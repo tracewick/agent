@@ -4,7 +4,8 @@ Long-running Go sidecar that delivers Tracewick profiles from a local spool to [
 
 PHP applications write **spool v2** files; this agent claims them, aggregates, encodes **pprof**, and pushes via the Pyroscope Push API.
 
-> Status: scaffolding. Not production-ready yet.
+> [!WARNING]
+> **Early development.** This repository is a work in progress. APIs, flags, and behaviour may change without notice. Do not use in production.
 
 ## Related
 

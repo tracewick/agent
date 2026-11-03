@@ -12,7 +12,8 @@ COVER_PACKAGES ?= ./internal/...
 
 DOCKER_IMAGE ?= tracewick-agent:local
 
-.PHONY: help tidy fmt fmt-check lint vuln test test-race coverage ci build docker-build e2e
+.PHONY: help tidy fmt fmt-check lint vuln test test-race coverage ci build docker-build e2e \
+	stand-up stand-down stand-smoke pprof-check fuzz-smoke
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-14s %s\n", $$1, $$2}'
@@ -60,4 +61,24 @@ docker-build: ## Build the local container image (tracewick-agent:local)
 e2e: ## Cross-process E2E (build tag e2e; not part of make ci)
 	$(GO) test -tags=e2e -count=1 -timeout=5m ./test/e2e/
 
-ci: tidy fmt-check lint vuln test-race coverage ## Local PR gate (mirrors Checks)
+stand-up: ## Start Pyroscope + Toxiproxy (127.0.0.1)
+	docker compose up -d --wait
+	./docker/wait-for-url.sh http://127.0.0.1:4040/ready
+	./docker/wait-for-url.sh http://127.0.0.1:14040/ready
+
+stand-down: ## Stop the stand and remove volumes
+	docker compose down --volumes --remove-orphans
+
+stand-smoke: ## Check a running stand is wired (Pyroscope + Toxiproxy)
+	./docker/smoke-test.sh
+
+pprof-check: ## Validate testdata/pprof/*.pb with go tool pprof (library CI parity)
+	@for f in testdata/pprof/*.pb; do \
+		echo "==> $$f"; \
+		$(GO) tool pprof -raw "$$f" >/dev/null; \
+	done
+
+fuzz-smoke: ## Short SpoolFile fuzz run for CI
+	$(GO) test ./internal/spool/ -fuzz=FuzzParse -fuzztime=15s
+
+ci: tidy fmt-check lint vuln test-race coverage pprof-check ## Local PR gate (mirrors Checks)

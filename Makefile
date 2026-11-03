@@ -12,7 +12,7 @@ COVER_PACKAGES ?= ./internal/...
 
 DOCKER_IMAGE ?= tracewick-agent:local
 
-.PHONY: help tidy fmt fmt-check lint vuln test test-race coverage ci build docker-build
+.PHONY: help tidy fmt fmt-check lint vuln test test-race coverage ci build docker-build e2e
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-14s %s\n", $$1, $$2}'
@@ -56,5 +56,8 @@ build: ## Build the tracewick-agent binary into bin/
 
 docker-build: ## Build the local container image (tracewick-agent:local)
 	docker build -t $(DOCKER_IMAGE) .
+
+e2e: ## Cross-process E2E (build tag e2e; not part of make ci)
+	$(GO) test -tags=e2e -count=1 -timeout=5m ./test/e2e/
 
 ci: tidy fmt-check lint vuln test-race coverage ## Local PR gate (mirrors Checks)

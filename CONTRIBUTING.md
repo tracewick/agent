@@ -20,10 +20,12 @@ make ci          # fmt-check, golangci-lint, govulncheck, test -race, coverage
 make test-race
 make lint
 make build
+make e2e         # cross-process E2E (separate from make ci; CI workflow e2e.yml)
 ```
 
 Before every push, run what CI would catch on your change. Prefer `make ci`.
-Do not push blind and fix lint on GitHub.
+Do not push blind and fix lint on GitHub. Touching spool claim or the agent
+loop: also run `make e2e`.
 
 ## Rules
 

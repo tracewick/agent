@@ -22,6 +22,7 @@ long-running `run` command; the binary is not production-ready yet.
 git clone https://github.com/tracewick/agent.git
 cd agent
 make ci      # fmt, lint, govulncheck, race tests, coverage
+make e2e     # cross-process E2E (separate workflow; build tag e2e)
 make build
 ./bin/tracewick-agent version
 ./bin/tracewick-agent run --spool-dir=/var/spool/tracewick --pyroscope-url=http://localhost:4040 --once

@@ -10,7 +10,9 @@ COVER_PROFILE ?= build/coverage/coverage.out
 # cmd/ is a thin main; coverage gates apply to internal packages (library parity).
 COVER_PACKAGES ?= ./internal/...
 
-.PHONY: help tidy fmt fmt-check lint vuln test test-race coverage ci build
+DOCKER_IMAGE ?= tracewick-agent:local
+
+.PHONY: help tidy fmt fmt-check lint vuln test test-race coverage ci build docker-build
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-14s %s\n", $$1, $$2}'
@@ -51,5 +53,8 @@ coverage: ## Write coverage profile under build/coverage
 build: ## Build the tracewick-agent binary into bin/
 	mkdir -p bin
 	$(GO) build -o bin/tracewick-agent ./cmd/tracewick-agent
+
+docker-build: ## Build the local container image (tracewick-agent:local)
+	docker build -t $(DOCKER_IMAGE) .
 
 ci: tidy fmt-check lint vuln test-race coverage ## Local PR gate (mirrors Checks)

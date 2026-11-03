@@ -34,6 +34,20 @@ argv; same rule as `tracewick-drain`). Do not put credentials in `--pyroscope-ur
 Optional Prometheus scrape: `--metrics-listen` / `TRACEWICK_METRICS_LISTEN` serves `GET /metrics`.
 Custom HTTPS CA: `--tls-ca` / `TRACEWICK_TLS_CA` (PEM); verification stays on.
 
+### Spool permissions (UID)
+
+PHP writes spool dirs as `0700` and files as `0600`. Run the agent as the **same
+UID/GID** as PHP-FPM (or set `runAsUser` / `fsGroup` together). Examples:
+
+- Compose: [`deploy/docker-compose.yml`](deploy/docker-compose.yml)
+- Kubernetes: [`deploy/kubernetes/agent.yaml`](deploy/kubernetes/agent.yaml)
+- Notes: [`deploy/README.md`](deploy/README.md)
+
+```bash
+make docker-build
+docker compose -f deploy/docker-compose.yml up
+```
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
 
 ## Related

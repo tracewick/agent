@@ -30,6 +30,7 @@ make build
 - `internal/delivery/`, `internal/aggregate/`, `internal/pprof/`, `internal/pyroscope/`,
   `internal/config/`, `internal/metrics/`
 - `testdata/spool/v2/` — fixtures compatible with the PHP library
+- `deploy/` — UID-compatible Compose/Kubernetes examples + Dockerfile
 - `test/e2e/` — cross-process E2E (M4+)
 
 ## Rules

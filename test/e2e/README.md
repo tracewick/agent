@@ -37,5 +37,7 @@ cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick
 
 ## Status
 
-- Done: two Go agents (httptest); stand compose + smoke; toxic timeout chaos smoke.
-- Next: Querier live round-trip; Go + PHP-drain; FakeHttp-class HTTP faults; mutation gate.
+- Done: two Go agents (httptest); stand compose + smoke; toxic timeout chaos smoke;
+  live Querier LabelValues round-trip (`TestLivePyroscopeRoundTrip`).
+- Next: Go + PHP-drain; expand Toxiproxy/process chaos; FakeHttp-class HTTP faults;
+  mutation gate.

@@ -37,12 +37,16 @@ cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick
 
 ## Status
 
-- Done: two Go agents; Toxiproxy chaos + kill/stale reclaim; Go + PHP drain;
+- Done: two Go agents (httptest); stand compose + smoke;
+  Toxiproxy suite (healthy / latency / timeout / reset_peer / limit_data) +
+  process kill -9 → stale reclaim; Go + PHP `tracewick-drain` coexistence;
   live Querier at check-profiles depth (`LabelValues`, `ProfileTypes`
   wall:nanoseconds, `SelectMergeStacktraces` + fixture frames, no raw URLs);
   401 pause keeps spool; fixture reject+deliver; long-run SIGTERM after drain.
   `make e2e` uses `-v` so lines prefixed `e2e:` show progress in CI.
-- Next: UID-mismatch chaos (deploy/root); benchmarks soak.
+- Next: UID-mismatch chaos (deploy/root); benchmarks soak. Mutation MSI gate is
+  `make mutation` (Checks step, not e2e). FakeHttp-class faults live under
+  `internal/testhttp` + `internal/pyroscope` (unit).
 
 ## PHP drain for local E2E
 

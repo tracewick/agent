@@ -18,12 +18,14 @@ concurrency:
 env:
   GO_VERSION: "1.27.3"
   GOLANGCI_LINT_VERSION: v2.15.0
+  GREMLINS_VERSION: v0.6.0
 
 jobs:
   checks:
     name: Checks
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Mutation adds ~2m on core packages; keep headroom above the old 15m budget.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v5
 
@@ -84,6 +86,12 @@ jobs:
           files: build/coverage/coverage.out
           token: ${{ secrets.CODECOV_TOKEN }}
           fail_ci_if_error: false
+
+      - name: Mutation testing (Gremlins)
+        if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
+        run: |
+          go install github.com/go-gremlins/gremlins/cmd/gremlins@${{ env.GREMLINS_VERSION }}
+          make mutation
 
   matrix:
     name: Tests (Go ${{ matrix.go }})

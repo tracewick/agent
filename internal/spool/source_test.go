@@ -52,6 +52,9 @@ func TestClaimAckReleaseAndStaleReclaim(t *testing.T) {
 	if claimed.Path != wantPath {
 		t.Fatalf("path = %q want %q", claimed.Path, wantPath)
 	}
+	if !claimed.ClaimedAt.Equal(now) {
+		t.Fatalf("claimedAt = %v want %v", claimed.ClaimedAt, now)
+	}
 	if _, parseErr := spool.Parse(claimed.Bytes); parseErr != nil {
 		t.Fatalf("parse claimed: %v", parseErr)
 	}

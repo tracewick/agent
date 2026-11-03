@@ -55,6 +55,8 @@ type Claimed struct {
 	Bytes []byte
 	// Path is the absolute claimed path (.X.spool.claimed-<id>-<epoch>).
 	Path string
+	// ClaimedAt is the claim epoch embedded in Path (ownership budget clock).
+	ClaimedAt time.Time
 }
 
 // Source reads a Tracewick spool directory with rename claims.
@@ -199,7 +201,8 @@ func (s *Source) tryClaim(name string) *Claimed {
 		return nil
 	}
 
-	claimedPath := s.claimPath(name)
+	claimedAt := s.cfg.Now().Truncate(time.Second)
+	claimedPath := s.claimPathAt(name, claimedAt)
 	if renameErr := osRename(source, claimedPath); renameErr != nil {
 		return nil
 	}
@@ -209,14 +212,18 @@ func (s *Source) tryClaim(name string) *Claimed {
 		return nil
 	}
 	if int64(len(data)) > s.cfg.MaxFileBytes {
-		_ = s.Reject(&Claimed{Name: name, Bytes: data, Path: claimedPath})
+		_ = s.Reject(&Claimed{Name: name, Bytes: data, Path: claimedPath, ClaimedAt: claimedAt})
 		return nil
 	}
-	return &Claimed{Name: name, Bytes: data, Path: claimedPath}
+	return &Claimed{Name: name, Bytes: data, Path: claimedPath, ClaimedAt: claimedAt}
 }
 
 func (s *Source) claimPath(name string) string {
-	epoch := s.cfg.Now().Unix()
+	return s.claimPathAt(name, s.cfg.Now())
+}
+
+func (s *Source) claimPathAt(name string, at time.Time) string {
+	epoch := at.Unix()
 	dir := filepath.Dir(s.path(name))
 	base := filepath.Base(name)
 	return filepath.Join(dir, "."+base+claimMarker+s.cfg.ReaderID+"-"+strconv.FormatInt(epoch, 10))

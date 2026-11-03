@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -104,6 +105,8 @@ type Profile struct {
 type StatusError struct {
 	StatusCode int
 	Body       string
+	// RetryAfter is the parsed Retry-After delay when the header is present and valid; zero otherwise.
+	RetryAfter time.Duration
 }
 
 func (e *StatusError) Error() string {
@@ -154,5 +157,32 @@ func (c *Client) Push(ctx context.Context, p *Profile) error {
 		return nil
 	}
 	snippet, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-	return &StatusError{StatusCode: resp.StatusCode, Body: strings.TrimSpace(string(snippet))}
+	return &StatusError{
+		StatusCode: resp.StatusCode,
+		Body:       strings.TrimSpace(string(snippet)),
+		RetryAfter: ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+	}
+}
+
+// ParseRetryAfter parses an HTTP Retry-After header (delay-seconds or HTTP-date).
+// Invalid or empty values yield 0. now is used for HTTP-date relative delays.
+func ParseRetryAfter(raw string, now time.Time) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0
+	}
+	if sec, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		if sec < 0 {
+			return 0
+		}
+		return time.Duration(sec) * time.Second
+	}
+	if t, err := http.ParseTime(raw); err == nil {
+		d := t.Sub(now)
+		if d < 0 {
+			return 0
+		}
+		return d
+	}
+	return 0
 }

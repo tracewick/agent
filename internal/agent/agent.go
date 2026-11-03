@@ -168,11 +168,8 @@ func (a *Agent) Run(admitCtx, pushCtx context.Context) error {
 		}
 		backoff := a.cfg.Sleep
 		if res.Outcome == OutcomeFailed {
-			attempt := failStreak - 1
-			if attempt < 0 {
-				attempt = 0
-			}
-			backoff = delivery.Backoff(attempt, res.RetryAfter, time.Second, 5*time.Minute, nil)
+			// failStreak was just incremented; attempt is 0-based.
+			backoff = delivery.Backoff(failStreak-1, res.RetryAfter, time.Second, 5*time.Minute, nil)
 		}
 		if err := a.sleep(admitCtx, backoff); err != nil {
 			return err

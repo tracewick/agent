@@ -177,9 +177,8 @@ func (s *Source) scanDirectory(directory, prefix string, files *[]string) error 
 				continue
 			}
 			if shardNameRE.MatchString(name) {
-				if err := s.scanDirectory(path, relative, files); err != nil {
-					return err
-				}
+				// Nested ReadDir failures are races / transient; scanDirectory ignores them when prefix != "".
+				_ = s.scanDirectory(path, relative, files)
 			}
 			continue
 		}

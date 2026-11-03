@@ -131,6 +131,32 @@ func TestScanReadDirFailureAndDefaults(t *testing.T) {
 		t.Fatalf("claim on unreadable dir: claimed=%v err=%v", claimed, claimErr)
 	}
 
+	// Nested shard ReadDir failure is ignored (not a root error).
+	dir := t.TempDir()
+	src2, err2 := NewSource(Config{Directory: dir, ReaderID: "reader-a"})
+	if err2 != nil {
+		t.Fatal(err2)
+	}
+	shard := filepath.Join(dir, "ab")
+	if mkdirErr := os.Mkdir(shard, 0o700); mkdirErr != nil { //nolint:gosec // temp
+		t.Fatal(mkdirErr)
+	}
+	calls := 0
+	osReadDir = func(path string) ([]os.DirEntry, error) {
+		calls++
+		if path == shard {
+			return nil, errors.New("shard boom")
+		}
+		return os.ReadDir(path)
+	}
+	files2, scanErr2 := src2.scan()
+	if scanErr2 != nil || len(files2) != 0 {
+		t.Fatalf("nested shard readdir fail should be ignored: files=%v err=%v", files2, scanErr2)
+	}
+	if calls < 2 {
+		t.Fatalf("expected root+shard ReadDir, calls=%d", calls)
+	}
+
 	osStat = func(string) (os.FileInfo, error) { return nil, errors.New("stat boom") }
 	if src.isOlderThan(filepath.Join(t.TempDir(), "missing"), time.Second) {
 		t.Fatal("missing path must not be older")

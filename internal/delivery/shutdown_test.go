@@ -76,6 +76,25 @@ func TestSplitAdmitGraceStopsAdmitImmediately(t *testing.T) {
 	}
 }
 
+func TestSplitAdmitGraceZeroCancelsWorkWithAdmit(t *testing.T) {
+	t.Parallel()
+	parent, stop := context.WithCancel(context.Background())
+	defer stop()
+	admit, work, cancel := delivery.SplitAdmitGrace(parent, 0)
+	defer cancel()
+	stop()
+	select {
+	case <-admit.Done():
+	case <-time.After(time.Second):
+		t.Fatal("admit")
+	}
+	select {
+	case <-work.Done():
+	case <-time.After(time.Second):
+		t.Fatal("work should cancel immediately when grace is 0")
+	}
+}
+
 func TestNotifyDefaultSignals(t *testing.T) {
 	t.Parallel()
 	ctx, stop := delivery.Notify(context.Background())

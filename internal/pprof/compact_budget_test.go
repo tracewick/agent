@@ -29,6 +29,40 @@ func TestDecodeCompactRejectsHugeFrameCountBeforeAlloc(t *testing.T) {
 	}
 }
 
+func TestDecodeCompactAppliesDefaultLimitsWhenZero(t *testing.T) {
+	t.Parallel()
+	fn := "main"
+	ok, err := pprof.EncodeCompactStacks(
+		[]pprof.Frame{{Function: &fn}},
+		[]pprof.Stack{{FrameIDs: []int{0}, Count: 1}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := pprof.DecodeCompactStacksLimited(ok, pprof.DecodeLimits{}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestDecodeCompactRejectsTooManyStacks(t *testing.T) {
+	t.Parallel()
+	// schema=1, 0 strings, stackCount=3 with MaxStacks=2
+	payload := []byte{1}
+	payload = appendU32Be(payload, 0) // strings
+	payload = appendU32Be(payload, 3) // stacks
+	for i := 0; i < 3; i++ {
+		payload = appendU32Be(payload, 1) // weight
+		payload = append(payload, 0)      // flags
+		payload = appendU32Be(payload, 0) // frameCount
+	}
+	_, _, err := pprof.DecodeCompactStacksLimited(payload, pprof.DecodeLimits{
+		MaxStacks: 2, MaxFrames: 10, MaxStrings: 10,
+	})
+	if err == nil {
+		t.Fatal("expected max stacks")
+	}
+}
+
 func TestDecodeCompactRespectsMaxStrings(t *testing.T) {
 	t.Parallel()
 	payload := []byte{1}

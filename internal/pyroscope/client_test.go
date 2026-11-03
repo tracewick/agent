@@ -14,6 +14,34 @@ import (
 	"github.com/tracewick/agent/internal/spool"
 )
 
+func TestNewClientDefaultRefusesRedirectFollow(t *testing.T) {
+	t.Parallel()
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("login"))
+	}))
+	t.Cleanup(final.Close)
+	redir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, final.URL, http.StatusFound)
+	}))
+	t.Cleanup(redir.Close)
+
+	client, err := pyroscope.NewClient(&pyroscope.Config{ServerURL: redir.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Push hits redir+Path; server returns 302 — Classify path uses StatusError, not a followed 200.
+	err = client.Push(context.Background(), &pyroscope.Profile{
+		Application: "blog",
+		EventType:   spool.EventWall,
+		RawProfile:  []byte("x"),
+	})
+	var st *pyroscope.StatusError
+	if !errors.As(err, &st) || st.StatusCode != http.StatusFound {
+		t.Fatalf("want 302 StatusError, got %v", err)
+	}
+}
+
 func TestClientPushHappyPath(t *testing.T) {
 	t.Parallel()
 

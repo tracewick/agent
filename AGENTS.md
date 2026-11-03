@@ -24,9 +24,9 @@ make build
 ## Layout
 
 - `cmd/tracewick-agent/` — binary entrypoint
-- `internal/spool/`, `internal/twsp/`, `internal/aggregate/`, `internal/pprof/`,
-  `internal/pyroscope/`, `internal/config/`, `internal/metrics/` — core packages
-  (added as milestones progress)
+- `internal/spool/` — spool file parse (SpoolFile) + directory claim/ack/release
+- `internal/aggregate/`, `internal/pprof/`, `internal/pyroscope/`, `internal/config/`,
+  `internal/metrics/` — added as milestones progress
 - `testdata/spool/v2/` — fixtures compatible with the PHP library
 - `test/e2e/` — cross-process E2E (M4+)
 

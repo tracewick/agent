@@ -13,8 +13,8 @@ encodes **pprof**, and pushes via the Pyroscope Push API.
 ## Status
 
 Early development: git flow, strict CI, lint, and coverage gates are in place.
-Spool parse/claim, aggregation, and pprof encode land package by package; the
-binary is not production-ready yet.
+Spool claim → aggregate → pprof → Push → ack loop works with `--once` and the
+long-running `run` command; the binary is not production-ready yet.
 
 ## Develop
 
@@ -24,7 +24,10 @@ cd agent
 make ci      # fmt, lint, govulncheck, race tests, coverage
 make build
 ./bin/tracewick-agent version
+./bin/tracewick-agent run --spool-dir=/var/spool/tracewick --pyroscope-url=http://localhost:4040 --once
 ```
+
+Password for Pyroscope basic auth: `TRACEWICK_PYROSCOPE_PASSWORD` in the environment (never argv).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
 

@@ -235,3 +235,48 @@ func TestFreshTemporaryNotDeleted(t *testing.T) {
 		t.Fatalf("fresh temp should remain: %v", statErr)
 	}
 }
+
+func TestParseMissingRequiredHeaderKeys(t *testing.T) {
+	t.Parallel()
+
+	keys := []string{"payload_size", "application", "event_type", "period_ns", "start_ns", "end_ns", "format"}
+	for _, key := range keys {
+		t.Run("missing "+key, func(t *testing.T) {
+			t.Parallel()
+			h := validHeader()
+			delete(h, key)
+			payload := []byte{1}
+			if key == "payload_size" {
+				raw, err := json.Marshal(h)
+				if err != nil {
+					t.Fatal(err)
+				}
+				var lenBuf [4]byte
+				binary.BigEndian.PutUint32(lenBuf[:], uint32(len(raw))) //nolint:gosec // tiny test header
+				buf := append(append(append([]byte{}, "TWSP"...), spool.Version2), lenBuf[:]...)
+				buf = append(buf, raw...)
+				buf = append(buf, payload...)
+				if _, parseErr := spool.Parse(buf); parseErr == nil {
+					t.Fatal("expected error")
+				}
+				return
+			}
+			if _, err := spool.Parse(buildSpool(t, h, payload)); err == nil {
+				t.Fatal("expected error")
+			}
+		})
+	}
+}
+
+func TestParseRejectsBrokenLabelsObject(t *testing.T) {
+	t.Parallel()
+
+	// '{' passes the object prefix check; truncated JSON still fails Unmarshal.
+	header := []byte(`{"application":"blog","event_type":"wall","period_ns":1,"start_ns":1,"end_ns":1,"format":"compact-stacks","payload_size":0,"labels":{`)
+	var lenBuf [4]byte
+	binary.BigEndian.PutUint32(lenBuf[:], uint32(len(header))) //nolint:gosec // tiny test header
+	buf := append(append([]byte{'T', 'W', 'S', 'P', spool.Version2}, lenBuf[:]...), header...)
+	if _, err := spool.Parse(buf); err == nil {
+		t.Fatal("expected broken labels / header JSON error")
+	}
+}

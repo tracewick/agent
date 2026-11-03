@@ -26,6 +26,14 @@ var (
 	claimEpochRE   = regexp.MustCompile(`\.claimed-[A-Za-z0-9._-]+-(\d+)$`)
 	readerIDRE     = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
 	errBadReaderID = errors.New("reader id must be 1..64 letters, digits, dots, underscores or dashes")
+
+	// OS seams — overridden in tests for error paths.
+	osStat     = os.Stat
+	osRename   = os.Rename
+	osReadFile = os.ReadFile
+	osRemove   = os.Remove
+	osReadDir  = os.ReadDir
+	osMkdirAll = os.MkdirAll
 )
 
 // Config configures a directory spool reader.
@@ -92,11 +100,7 @@ func (s *Source) Claim() (*Claimed, error) {
 		for len(s.queue) > 0 {
 			name := s.queue[0]
 			s.queue = s.queue[1:]
-			claimed, err := s.tryClaim(name)
-			if err != nil {
-				return nil, err
-			}
-			if claimed != nil {
+			if claimed := s.tryClaim(name); claimed != nil {
 				return claimed, nil
 			}
 		}
@@ -105,27 +109,27 @@ func (s *Source) Claim() (*Claimed, error) {
 
 // Acknowledge deletes a successfully delivered claimed file.
 func (s *Source) Acknowledge(c *Claimed) error {
-	return os.Remove(c.Path)
+	return osRemove(c.Path)
 }
 
 // Release returns a claimed file to the queue as its original name.
 func (s *Source) Release(c *Claimed) error {
-	return os.Rename(c.Path, s.path(c.Name))
+	return osRename(c.Path, s.path(c.Name))
 }
 
 // Reject moves a claimed file to rejected/ (or deletes it when MaxRejectedFiles is 0).
 func (s *Source) Reject(c *Claimed) error {
 	if s.cfg.MaxRejectedFiles == 0 {
-		return os.Remove(c.Path)
+		return osRemove(c.Path)
 	}
 	rejectedDir := s.path(RejectedDirectory)
-	if err := os.MkdirAll(rejectedDir, 0o700); err != nil {
-		_ = os.Remove(c.Path)
+	if err := osMkdirAll(rejectedDir, 0o700); err != nil {
+		_ = osRemove(c.Path)
 		return err
 	}
 	dest := filepath.Join(rejectedDir, filepath.Base(c.Name))
-	if err := os.Rename(c.Path, dest); err != nil {
-		_ = os.Remove(c.Path)
+	if err := osRename(c.Path, dest); err != nil {
+		_ = osRemove(c.Path)
 		return err
 	}
 	s.trimRejected(rejectedDir)
@@ -140,15 +144,12 @@ func (s *Source) scan() []string {
 }
 
 func (s *Source) scanDirectory(directory, prefix string, files *[]string) {
-	entries, err := os.ReadDir(directory)
+	entries, err := osReadDir(directory)
 	if err != nil {
 		return
 	}
 	for _, entry := range entries {
 		name := entry.Name()
-		if name == "." || name == ".." {
-			continue
-		}
 		relative := name
 		if prefix != "" {
 			relative = prefix + "/" + name
@@ -171,47 +172,47 @@ func (s *Source) scanDirectory(directory, prefix string, files *[]string) {
 		case strings.HasPrefix(name, ".") && strings.Contains(name, spoolSuffix+claimMarker):
 			if spoolName, ok := claimedRelativeName(name, prefix); ok {
 				if s.isClaimAbandoned(name, path) {
-					if err := os.Rename(path, s.path(spoolName)); err == nil {
+					if err := osRename(path, s.path(spoolName)); err == nil {
 						*files = append(*files, spoolName)
 					}
 				}
 			}
 		case strings.HasPrefix(name, ".") && strings.HasSuffix(name, temporarySuffix):
 			if s.isOlderThan(path, s.cfg.StaleTemporary) {
-				_ = os.Remove(path)
+				_ = osRemove(path)
 			}
 		}
 	}
 }
 
-func (s *Source) tryClaim(name string) (*Claimed, error) {
+func (s *Source) tryClaim(name string) *Claimed {
 	source := s.path(name)
-	info, err := os.Stat(source)
+	info, err := osStat(source)
 	if err != nil {
-		return nil, nil
+		return nil
 	}
 	if info.Size() > s.cfg.MaxFileBytes {
 		oversized := s.claimPath(name)
-		if renameErr := os.Rename(source, oversized); renameErr == nil {
+		if renameErr := osRename(source, oversized); renameErr == nil {
 			_ = s.Reject(&Claimed{Name: name, Path: oversized})
 		}
-		return nil, nil
+		return nil
 	}
 
 	claimedPath := s.claimPath(name)
-	if renameErr := os.Rename(source, claimedPath); renameErr != nil {
-		return nil, nil
+	if renameErr := osRename(source, claimedPath); renameErr != nil {
+		return nil
 	}
-	data, readErr := os.ReadFile(claimedPath)
+	data, readErr := osReadFile(claimedPath)
 	if readErr != nil {
-		_ = os.Rename(claimedPath, source)
-		return nil, nil
+		_ = osRename(claimedPath, source)
+		return nil
 	}
 	if int64(len(data)) > s.cfg.MaxFileBytes {
 		_ = s.Reject(&Claimed{Name: name, Bytes: data, Path: claimedPath})
-		return nil, nil
+		return nil
 	}
-	return &Claimed{Name: name, Bytes: data, Path: claimedPath}, nil
+	return &Claimed{Name: name, Bytes: data, Path: claimedPath}
 }
 
 func (s *Source) claimPath(name string) string {
@@ -249,7 +250,7 @@ func (s *Source) isClaimAbandoned(entry, path string) bool {
 }
 
 func (s *Source) isOlderThan(path string, age time.Duration) bool {
-	info, err := os.Stat(path)
+	info, err := osStat(path)
 	if err != nil {
 		return false
 	}
@@ -257,7 +258,7 @@ func (s *Source) isOlderThan(path string, age time.Duration) bool {
 }
 
 func (s *Source) trimRejected(rejectedDir string) {
-	entries, err := os.ReadDir(rejectedDir)
+	entries, err := osReadDir(rejectedDir)
 	if err != nil {
 		return
 	}
@@ -270,7 +271,7 @@ func (s *Source) trimRejected(rejectedDir string) {
 	sort.Strings(files)
 	extra := len(files) - s.cfg.MaxRejectedFiles
 	for i := 0; i < extra; i++ {
-		_ = os.Remove(filepath.Join(rejectedDir, files[i]))
+		_ = osRemove(filepath.Join(rejectedDir, files[i]))
 	}
 }
 

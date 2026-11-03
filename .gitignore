@@ -1,0 +1,25 @@
+# Binaries
+/bin/
+/dist/
+/tracewick-agent
+*.exe
+*.test
+*.out
+
+# Coverage / tooling
+/coverage.out
+/coverage.html
+/build/
+.golangci.cache/
+
+# IDE / OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+
+# Env / secrets
+.env
+.env.*
+!.env.example
+bin/

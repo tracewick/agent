@@ -1,0 +1,34 @@
+# GoReleaser stub — full multi-arch Docker / SBOM / cosign land with M5.
+# Unsigned early-dev releases are expected until signing is wired.
+version: 2
+
+project_name: tracewick-agent
+
+builds:
+  - id: tracewick-agent
+    main: ./cmd/tracewick-agent
+    binary: tracewick-agent
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/tracewick/agent/internal/version.Version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+changelog:
+  disable: true
+
+release:
+  draft: false
+  mode: replace

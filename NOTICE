@@ -1,0 +1,10 @@
+Tracewick Agent
+Copyright 2026 The Tracewick Authors
+
+This product includes software developed by The Tracewick Authors
+(https://github.com/tracewick/agent).
+
+Tracewick Agent delivers profiles produced by the Tracewick PHP library
+(https://github.com/tracewick/tracewick). It is an independent Go process; no
+PHP library source is vendored into this repository except public test fixtures
+copied under their Apache-2.0 terms when added.

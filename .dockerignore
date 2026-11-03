@@ -1,0 +1,17 @@
+.bin/
+/build/
+/dist/
+.git/
+.github/
+.cursor/
+**/*_test.go
+**/testdata/
+*.md
+!README.md
+.DS_Store
+.idea/
+.vscode/
+.env
+.env.*
+coverage.out
+*.out

@@ -122,8 +122,12 @@ func requireDocker(t *testing.T) {
 		t.Skipf("docker unavailable: %v (%s)", err, bytesTrim(out))
 	}
 	logf(t, "docker server %s", bytesTrim(out))
-	// docker version can succeed while `docker run` is wedged (Desktop glitches).
-	probe, err := dockerRun(t, 20*time.Second, nil, "run", "--rm", "--pull=never", busyboxImage, "/bin/echo", "ok")
+	// Ensure the image exists (CI runners are clean; --pull=never would skip the suite).
+	if pullOut, pullErr := dockerRun(t, 2*time.Minute, nil, "pull", busyboxImage); pullErr != nil {
+		t.Skipf("docker pull %s: %v (%s)", busyboxImage, pullErr, bytesTrim(pullOut))
+	}
+	// docker version/pull can succeed while `docker run` is wedged (Desktop glitches).
+	probe, err := dockerRun(t, 30*time.Second, nil, "run", "--rm", "--pull=never", busyboxImage, "/bin/echo", "ok")
 	if err != nil {
 		t.Skipf("docker run unavailable (restart Docker Desktop?): %v (%s)", err, bytesTrim(probe))
 	}

@@ -132,7 +132,7 @@ func TestAgentPauseOnce(t *testing.T) {
 		AggregationWindowSec: 15, StaleClaim: 10 * time.Minute, OwnershipMargin: time.Minute,
 		MaxFilesPerPass: 8, MaxBatchInputBytes: 8 << 20, HTTPTimeout: time.Second, MaxCardinality: 256, Once: true,
 	}
-	a, err := New(cfg, nil, nil)
+	a, err := New(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -433,7 +433,7 @@ func TestNewValidationErrors(t *testing.T) {
 	}
 	for i, cfg := range cases {
 		cfg := cfg
-		if _, err := New(&cfg, nil, http.DefaultClient); err == nil {
+		if _, err := New(&cfg, nil, http.DefaultClient, nil); err == nil {
 			t.Fatalf("case %d: want error", i)
 		}
 	}
@@ -456,7 +456,7 @@ func TestAgentRunPauseBackoffAndMore(t *testing.T) {
 		AggregationWindowSec: 15, StaleClaim: 10 * time.Minute, OwnershipMargin: time.Minute,
 		MaxFilesPerPass: 1, MaxBatchInputBytes: 8 << 20, HTTPTimeout: time.Second, MaxCardinality: 256, Once: true,
 	}
-	a, err := New(cfg, nil, nil)
+	a, err := New(cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -476,7 +476,7 @@ func TestAgentRunPauseBackoffAndMore(t *testing.T) {
 	cfg2.Once = false
 	cfg2.Sleep = time.Hour
 	cfg2.ReaderID = "loop"
-	a2, err := New(&cfg2, nil, nil)
+	a2, err := New(&cfg2, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -506,7 +506,7 @@ func TestAgentRunPauseBackoffAndMore(t *testing.T) {
 	cfg3.Once = false
 	cfg3.Sleep = 10 * time.Millisecond
 	cfg3.ReaderID = "pause2"
-	a3, err := New(&cfg3, nil, nil)
+	a3, err := New(&cfg3, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -548,7 +548,7 @@ func TestAgentRunPauseBackoffAndMore(t *testing.T) {
 	cfg4.Once = false
 	cfg4.Sleep = 10 * time.Millisecond
 	cfg4.ReaderID = "fail2"
-	a4, err := New(&cfg4, nil, nil)
+	a4, err := New(&cfg4, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

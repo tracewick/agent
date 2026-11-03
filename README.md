@@ -25,9 +25,12 @@ make ci      # fmt, lint, govulncheck, race tests, coverage
 make build
 ./bin/tracewick-agent version
 ./bin/tracewick-agent run --spool-dir=/var/spool/tracewick --pyroscope-url=http://localhost:4040 --once
+./bin/tracewick-agent run --spool-dir=/var/spool/tracewick --pyroscope-url=http://localhost:4040 \
+  --metrics-listen=127.0.0.1:9090
 ```
 
 Password for Pyroscope basic auth: `TRACEWICK_PYROSCOPE_PASSWORD` in the environment (never argv).
+Optional Prometheus scrape: `--metrics-listen` / `TRACEWICK_METRICS_LISTEN` serves `GET /metrics`.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
 

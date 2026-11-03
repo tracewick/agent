@@ -8,6 +8,7 @@ import (
 
 	"github.com/tracewick/agent/internal/aggregate"
 	"github.com/tracewick/agent/internal/delivery"
+	"github.com/tracewick/agent/internal/metrics"
 	"github.com/tracewick/agent/internal/pprof"
 	"github.com/tracewick/agent/internal/pyroscope"
 	"github.com/tracewick/agent/internal/spool"
@@ -60,6 +61,7 @@ type Drainer struct {
 	HTTPTimeout        time.Duration
 	Log                *slog.Logger
 	Now                func() time.Time
+	Metrics            *metrics.Registry // optional; nil-safe
 }
 
 // Drain claims a batch, groups by ADR-12 key+window, merges, encodes pprof, pushes,
@@ -88,6 +90,13 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 		return Result{Outcome: OutcomeEmpty}
 	}
 
+	var batchBytes int64
+	for _, c := range batch {
+		batchBytes += int64(len(c.Bytes))
+	}
+	d.Metrics.AddClaimed(int64(len(batch)))
+	d.Metrics.ObserveBatch(len(batch), batchBytes)
+
 	held := append([]*spool.Claimed(nil), batch...)
 	defer func() { d.releaseAll(held) }()
 
@@ -108,6 +117,7 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 			_ = d.Source.Reject(claimed)
 			held = withoutClaim(held, claimed)
 			rejected++
+			d.Metrics.AddRejected(1)
 			d.Log.Warn("reject oversized claim", "file", claimed.Name, "err", limErr)
 			continue
 		}
@@ -116,6 +126,7 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 			_ = d.Source.Reject(claimed)
 			held = withoutClaim(held, claimed)
 			rejected++
+			d.Metrics.AddRejected(1)
 			d.Log.Warn("reject unreadable spool", "file", claimed.Name, "err", parseErr)
 			continue
 		}
@@ -142,6 +153,7 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 	}
 
 	delivered := 0
+	posts := 0
 	for _, g := range groups {
 		claimedFiles := make([]*spool.Claimed, 0, len(g.Files))
 		for _, f := range g.Files {
@@ -161,6 +173,7 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 		}
 
 		decision := d.pushGroup(ctx, &g)
+		posts++
 		switch decision.Action {
 		case delivery.ActionAck:
 			for _, c := range claimedFiles {
@@ -170,15 +183,18 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 				held = withoutClaim(held, c)
 				delivered++
 			}
+			d.Metrics.AddDelivered(int64(len(claimedFiles)))
 		case delivery.ActionReject:
 			for _, c := range claimedFiles {
 				_ = d.Source.Reject(c)
 				held = withoutClaim(held, c)
 				rejected++
 			}
+			d.Metrics.AddRejected(int64(len(claimedFiles)))
 			d.Log.Warn("rejected group", "reason", decision.Reason, "n", len(claimedFiles))
 		case delivery.ActionPauseAuth, delivery.ActionPauseEndpoint:
 			d.Log.Error("pausing delivery", "action", decision.Action.String(), "reason", decision.Reason)
+			d.setAggRatio(len(members), posts)
 			return Result{
 				Outcome:   OutcomePaused,
 				Delivered: delivered,
@@ -193,22 +209,36 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 					held = withoutClaim(held, c)
 					rejected++
 				}
+				d.Metrics.AddRejected(int64(len(claimedFiles)))
 				d.Log.Warn("413 on single-profile group; rejected", "reason", decision.Reason)
 				continue
 			}
 			d.MaxBatchInputBytes = maxInt64(maxBytes/2, 1)
+			d.Metrics.AddRetried(int64(len(claimedFiles)))
 			d.Log.Warn("413; shrink next batch", "bytes", d.MaxBatchInputBytes, "reason", decision.Reason)
+			d.setAggRatio(len(members), posts)
 			return Result{Outcome: OutcomeFailed, Delivered: delivered, Rejected: rejected, Failure: decision.Reason}
 		default: // retry / transport → release held (defer) and end pass; Agent backs off
+			d.Metrics.AddRetried(int64(len(claimedFiles)))
 			d.Log.Warn("push failed; releasing held claims", "action", decision.Action.String(), "reason", decision.Reason)
+			d.setAggRatio(len(members), posts)
 			return Result{Outcome: OutcomeFailed, Delivered: delivered, Rejected: rejected, Failure: decision.Reason}
 		}
 	}
 
+	d.setAggRatio(len(members), posts)
 	if hitBudget || len(batch) >= maxFiles {
 		return Result{Outcome: OutcomeMore, Delivered: delivered, Rejected: rejected}
 	}
 	return Result{Outcome: OutcomeEmpty, Delivered: delivered, Rejected: rejected}
+}
+
+func (d *Drainer) setAggRatio(profiles, posts int) {
+	if posts <= 0 {
+		d.Metrics.SetAggregationRatio(0)
+		return
+	}
+	d.Metrics.SetAggregationRatio(float64(profiles) / float64(posts))
 }
 
 func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group) delivery.Decision {
@@ -247,12 +277,16 @@ func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group) delivery.De
 		pushCtx, cancel = context.WithTimeout(ctx, d.HTTPTimeout)
 		defer cancel()
 	}
+	d.Metrics.IncInflight()
+	start := d.Now()
 	err = d.Client.Push(pushCtx, &pyroscope.Profile{
 		Application: g.Key.Application,
 		EventType:   g.Key.EventType,
 		Labels:      labels,
 		RawProfile:  raw,
 	})
+	d.Metrics.ObserveUpload(d.Now().Sub(start))
+	d.Metrics.DecInflight()
 	return delivery.Classify(err)
 }
 

@@ -4,13 +4,13 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"net"
 	"net/http"
 	"time"
 
 	"github.com/tracewick/agent/internal/aggregate"
 	"github.com/tracewick/agent/internal/config"
 	"github.com/tracewick/agent/internal/delivery"
+	"github.com/tracewick/agent/internal/httputil"
 	"github.com/tracewick/agent/internal/metrics"
 	"github.com/tracewick/agent/internal/pyroscope"
 	"github.com/tracewick/agent/internal/spool"
@@ -58,7 +58,10 @@ func New(cfg *config.Config, log *slog.Logger, httpClient *http.Client, registry
 		return nil, err
 	}
 	if httpClient == nil {
-		httpClient = newHTTPClient(cfg.HTTPTimeout)
+		httpClient, err = httputil.NewHTTPClient(cfg.HTTPTimeout, httputil.TLSOptions{CAFile: cfg.TLSCAFile})
+		if err != nil {
+			return nil, err
+		}
 	}
 	client, err := pyroscope.NewClient(&pyroscope.Config{
 		ServerURL:     cfg.PyroscopeURL,
@@ -164,26 +167,6 @@ func (a *Agent) refreshSpoolBacklog() {
 	}
 	b := a.drainer.Source.Backlog()
 	a.metrics.SetSpoolBacklog(b.Files, b.Bytes, b.OldestAge)
-}
-
-func newHTTPClient(timeout time.Duration) *http.Client {
-	if timeout <= 0 {
-		timeout = 10 * time.Second
-	}
-	transport := &http.Transport{
-		Proxy: http.ProxyFromEnvironment,
-		DialContext: (&net.Dialer{
-			Timeout:   10 * time.Second,
-			KeepAlive: 30 * time.Second,
-		}).DialContext,
-		ForceAttemptHTTP2:     true,
-		MaxIdleConns:          100,
-		MaxIdleConnsPerHost:   10,
-		IdleConnTimeout:       90 * time.Second,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: time.Second,
-	}
-	return &http.Client{Timeout: timeout, Transport: transport}
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {

@@ -11,6 +11,7 @@ import (
 	"github.com/tracewick/agent/internal/agent"
 	"github.com/tracewick/agent/internal/config"
 	"github.com/tracewick/agent/internal/delivery"
+	"github.com/tracewick/agent/internal/logging"
 	"github.com/tracewick/agent/internal/metrics"
 	"github.com/tracewick/agent/internal/version"
 )
@@ -54,7 +55,8 @@ func runAgent(parent context.Context, args []string, stdout, stderr io.Writer) e
 		return err
 	}
 
-	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	baseLog := slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo})
+	log := slog.New(logging.NewRedactingHandler(baseLog, cfg.PyroscopePassword))
 	reg := metrics.New()
 	a, err := agent.New(&cfg, log, nil, reg)
 	if err != nil {

@@ -337,10 +337,6 @@ func TestDrainerNilWindowAndHelpers(t *testing.T) {
 	if err := sleepCtx(ctx, time.Hour); err == nil {
 		t.Fatal("expected cancel")
 	}
-	c := newHTTPClient(0)
-	if c == nil || c.Timeout <= 0 {
-		t.Fatal("http client")
-	}
 }
 
 func TestDrainerAckReleaseFailures(t *testing.T) {
@@ -431,9 +427,18 @@ func TestNewValidationErrors(t *testing.T) {
 		c.MaxCardinality = 0
 		cases = append(cases, c)
 	}
+	{
+		c := base()
+		c.TLSCAFile = filepath.Join(t.TempDir(), "missing-ca.pem")
+		cases = append(cases, c)
+	}
 	for i, cfg := range cases {
 		cfg := cfg
-		if _, err := New(&cfg, nil, http.DefaultClient, nil); err == nil {
+		var client *http.Client
+		if cfg.TLSCAFile == "" {
+			client = http.DefaultClient
+		}
+		if _, err := New(&cfg, nil, client, nil); err == nil {
 			t.Fatalf("case %d: want error", i)
 		}
 	}

@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ const (
 	envPyroscopePassword  = "TRACEWICK_PYROSCOPE_PASSWORD" //nolint:gosec // env var name, not a secret
 	envPyroscopeTenant    = "TRACEWICK_PYROSCOPE_TENANT"
 	envMetricsListen      = "TRACEWICK_METRICS_LISTEN"
+	envTLSCAFile          = "TRACEWICK_TLS_CA"
 	defaultSleep          = 5 * time.Second
 	defaultHTTPTimeout    = 10 * time.Second
 	defaultMaxFiles       = 256
@@ -45,6 +47,7 @@ type Config struct {
 	ShutdownGrace        time.Duration
 	MaxCardinality       int
 	MetricsListen        string // optional host:port for Prometheus /metrics; empty disables
+	TLSCAFile            string // optional PEM CA bundle for HTTPS to Pyroscope
 	Once                 bool   // one drain pass then exit
 }
 
@@ -60,6 +63,7 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 		PyroscopePassword:    getenv(envPyroscopePassword),
 		PyroscopeTenant:      getenv(envPyroscopeTenant),
 		MetricsListen:        getenv(envMetricsListen),
+		TLSCAFile:            getenv(envTLSCAFile),
 		AggregationWindowSec: aggregate.DefaultWindowSeconds,
 		Sleep:                defaultSleep,
 		StaleClaim:           delivery.DefaultStaleClaim,
@@ -158,6 +162,14 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 				return Config{}, err
 			}
 			cfg.MetricsListen = v
+		case strings.HasPrefix(arg, "--tls-ca="):
+			cfg.TLSCAFile = strings.TrimPrefix(arg, "--tls-ca=")
+		case arg == "--tls-ca":
+			v, err := needValue(args, &i, arg)
+			if err != nil {
+				return Config{}, err
+			}
+			cfg.TLSCAFile = v
 		case strings.HasPrefix(arg, "--pyroscope-password="), arg == "--pyroscope-password":
 			return Config{}, errors.New("config: do not pass the Pyroscope password on the command line; set " + envPyroscopePassword)
 		default:
@@ -170,6 +182,9 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	}
 	if cfg.PyroscopeURL == "" {
 		return Config{}, errors.New("config: --pyroscope-url or TRACEWICK_PYROSCOPE_URL is required")
+	}
+	if err := rejectURLUserinfo(cfg.PyroscopeURL); err != nil {
+		return Config{}, err
 	}
 	if cfg.ReaderID == "" {
 		host, _ := os.Hostname()
@@ -207,10 +222,12 @@ Options:
   --aggregation-window=S        merge window 10–15 seconds (default: 15)
   --sleep=DURATION              idle poll delay (default: 5s)
   --metrics-listen=ADDR         Prometheus /metrics bind (env TRACEWICK_METRICS_LISTEN; empty disables)
+  --tls-ca=PATH                 extra PEM CA roots for HTTPS (env TRACEWICK_TLS_CA)
   --once                        deliver one pass and exit
   --help                        show this help
 
 Password: set TRACEWICK_PYROSCOPE_PASSWORD in the environment (never argv).
+Do not put credentials in --pyroscope-url; use TRACEWICK_PYROSCOPE_USER / TRACEWICK_PYROSCOPE_PASSWORD.
 `) + "\n"
 }
 
@@ -225,4 +242,15 @@ func needValue(args []string, i *int, flag string) (string, error) {
 	}
 	*i++
 	return args[*i], nil
+}
+
+func rejectURLUserinfo(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return nil // NewClient validates the URL shape
+	}
+	if u.User != nil {
+		return errors.New("config: do not put credentials in --pyroscope-url; set TRACEWICK_PYROSCOPE_USER and TRACEWICK_PYROSCOPE_PASSWORD")
+	}
+	return nil
 }

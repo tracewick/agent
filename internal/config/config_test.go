@@ -55,6 +55,41 @@ func TestLoadRejectsPasswordOnArgv(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsURLUserinfo(t *testing.T) {
+	t.Parallel()
+	_, err := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://user:pass@pyroscope:4040",
+	}, func(string) string { return "" })
+	if err == nil || !strings.Contains(err.Error(), "credentials") {
+		t.Fatalf("%v", err)
+	}
+}
+
+func TestLoadTLSCA(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x", "--tls-ca=/etc/ssl/tracewick-ca.pem",
+	}, func(string) string { return "" })
+	if err != nil || cfg.TLSCAFile != "/etc/ssl/tracewick-ca.pem" {
+		t.Fatalf("%v %#v", err, cfg)
+	}
+	cfg2, err := config.Load([]string{
+		"--spool-dir", "/s", "--pyroscope-url", "http://x", "--tls-ca", "/ca.pem",
+	}, func(string) string { return "" })
+	if err != nil || cfg2.TLSCAFile != "/ca.pem" {
+		t.Fatalf("%v %#v", err, cfg2)
+	}
+	env := envMap{
+		"TRACEWICK_SPOOL_DIR":     "/s",
+		"TRACEWICK_PYROSCOPE_URL": "http://x",
+		"TRACEWICK_TLS_CA":        "/env-ca.pem",
+	}
+	cfg3, err := config.Load(nil, env.get)
+	if err != nil || cfg3.TLSCAFile != "/env-ca.pem" {
+		t.Fatalf("%v %#v", err, cfg3)
+	}
+}
+
 func TestLoadValidation(t *testing.T) {
 	t.Parallel()
 	empty := func(string) string { return "" }
@@ -78,7 +113,10 @@ func TestLoadValidation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "PASSWORD") {
 		t.Fatalf("auth pair: %v", err)
 	}
-	if !strings.Contains(config.Usage(), "TRACEWICK_PYROSCOPE_PASSWORD") || !strings.Contains(config.Usage(), "--metrics-listen") {
+	usage := config.Usage()
+	if !strings.Contains(usage, "TRACEWICK_PYROSCOPE_PASSWORD") ||
+		!strings.Contains(usage, "--metrics-listen") ||
+		!strings.Contains(usage, "--tls-ca") {
 		t.Fatal("usage")
 	}
 	if _, err := config.Load([]string{"--spool-dir"}, empty); err == nil {
@@ -146,6 +184,7 @@ func TestLoadEqualsFormsAndErrors(t *testing.T) {
 		{"window needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--aggregation-window"}, false},
 		{"sleep needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--sleep"}, false},
 		{"metrics-listen needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--metrics-listen"}, false},
+		{"tls-ca needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--tls-ca"}, false},
 		{"help", []string{"-h"}, true},
 	}
 	for _, tc := range cases {

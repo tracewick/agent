@@ -37,11 +37,14 @@ cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick
 
 ## Status
 
-- Done: two Go agents (httptest); stand compose + smoke; toxic timeout chaos smoke;
-  live Querier LabelValues round-trip (`TestLivePyroscopeRoundTrip`);
+- Done: two Go agents (httptest); stand compose + smoke;
+  Toxiproxy suite (healthy / latency / timeout / reset_peer / limit_data) +
+  process kill -9 → stale reclaim (`TestStandToxicChaosSuite`,
+  `TestProcessKillLeavesClaimThenStaleReclaim`);
+  live Querier LabelValues (`TestLivePyroscopeRoundTrip`);
   Go + PHP `tracewick-drain` claim coexistence (`TestGoAndPHPDrainOneSpool`, needs
   `TRACEWICK_DRAIN_BIN` / `make php-drain` / sibling `../tracewick`).
-- Next: expand Toxiproxy/process chaos; FakeHttp-class HTTP faults; mutation gate.
+- Next: FakeHttp-class HTTP faults; mutation gate; UID-mismatch chaos (deploy/root).
 
 ## PHP drain for local E2E
 

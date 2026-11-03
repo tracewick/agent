@@ -31,6 +31,7 @@ cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick
 | Claim coexistence | Real processes, one spool dir (two Go agents; Go + `tracewick-drain`) |
 | Pyroscope faults | **Toxiproxy** (`timeout` / `latency` / `reset_peer` / …) via `PYROSCOPE_TOXIC_URL` |
 | Healthy push | `PYROSCOPE_URL`; Querier asserts still to land |
+| UID mismatch | Docker named volumes (no host binds): spool `33:33` `0700`/`0600`; agent `1000` cannot claim, `33` delivers. Needs working `docker run` (CI ubuntu; local skip if Desktop wedged) |
 | Missing stand | Skip when stand env unset |
 
 `httptest` is fine for **fast claim/race smoke** only.
@@ -44,9 +45,11 @@ cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick
   wall:nanoseconds, `SelectMergeStacktraces` + fixture frames, no raw URLs);
   401 pause keeps spool; fixture reject+deliver; long-run SIGTERM after drain.
   `make e2e` uses `-v` so lines prefixed `e2e:` show progress in CI.
-- Next: UID-mismatch chaos (deploy/root); benchmarks soak. Mutation MSI gate is
-  `make mutation` (Checks step, not e2e). FakeHttp-class faults live under
-  `internal/testhttp` + `internal/pyroscope` (unit).
+- Done: UID-mismatch (Docker volume, wrong UID vs matching `33`) —
+  `TestUIDMismatchCannotClaimMatchingCan` (skips without docker).
+- Next: benchmarks soak. Mutation MSI gate is `make mutation` (Checks step, not
+  e2e). FakeHttp-class faults live under `internal/testhttp` +
+  `internal/pyroscope` (unit).
 
 ## PHP drain for local E2E
 

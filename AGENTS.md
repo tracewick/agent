@@ -26,6 +26,7 @@ make lint
 make build
 make stand-up    # Pyroscope + Toxiproxy
 make e2e         # cross-process E2E (not part of make ci; needs stand for toxic tests)
+make mutation    # Gremlins MSI on core (CI mutation.yml; .gremlins.yaml)
 make stand-down
 ```
 

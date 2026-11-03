@@ -1,0 +1,33 @@
+# Mutation testing for core packages (parity with Infection MSI gate in
+# tracewick/tracewick). CONDITIONALS_BOUNDARY is off: < vs <= survivors are
+# usually equivalent for our integer budgets; prefer negation/arithmetic.
+#
+# Plan: keep efficacy ≥80; raise mutant-coverage toward 80 as tests mature.
+# Never lower thresholds to silence escapes — fix tests or document equivalents.
+
+silent: false
+unleash:
+  timeout-coefficient: 30
+  workers: 0
+  threshold:
+    efficacy: 80
+    mutant-coverage: 75
+  exclude-files:
+    - '.*_fuzz\\.go'
+    - '.*_internal_test\\.go'
+
+mutants:
+  conditionals-boundary:
+    enabled: false
+  invert-assignments:
+    enabled: false
+  invert-bitwise:
+    enabled: false
+  invert-bwassign:
+    enabled: false
+  invert-logical:
+    enabled: false
+  invert-loopctrl:
+    enabled: false
+  remove-self-assignments:
+    enabled: false

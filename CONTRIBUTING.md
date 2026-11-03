@@ -38,11 +38,13 @@ make test-race
 make lint
 make build
 make e2e         # cross-process E2E (separate from make ci; CI workflow e2e.yml)
+make mutation    # Gremlins MSI gate on core packages (CI workflow mutation.yml)
 ```
 
 Before every push, run what CI would catch on your change. Prefer `make ci`.
 Do not push blind and fix lint on GitHub. Touching spool claim or the agent
-loop: also run `make e2e`.
+loop: also run `make e2e`. Changing delivery / aggregate / spool logic: also
+run `make mutation` (thresholds in `.gremlins.yaml`; never lower them to green).
 
 Cross-process E2E details and **Toxiproxy / stand parity** with
 [`tracewick/tracewick`](https://github.com/tracewick/tracewick) (not httptest for

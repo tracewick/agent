@@ -39,8 +39,15 @@ func TestClassifyStatusTable(t *testing.T) {
 			if d.Action != tc.want {
 				t.Fatalf("action = %v want %v", d.Action, tc.want)
 			}
+			if d.Reason != fmt.Sprintf("HTTP %d", tc.status) {
+				t.Fatalf("empty reason default = %q", d.Reason)
+			}
 			if tc.want == delivery.ActionRetry && d.RetryAfter != 2*time.Second {
 				t.Fatalf("retry-after = %s", d.RetryAfter)
+			}
+			labeled := delivery.ClassifyStatus(tc.status, 0, "labeled")
+			if labeled.Reason != "labeled" {
+				t.Fatalf("explicit reason = %q", labeled.Reason)
 			}
 		})
 	}
@@ -100,6 +107,10 @@ func TestBackoff(t *testing.T) {
 	d := delivery.Backoff(0, 0, time.Second, time.Minute, rng)
 	if d < 0 || d > time.Second {
 		t.Fatalf("jitter = %s", d)
+	}
+	// Int63n(d+1) with d=1ns must not panic; a +→− mutant calls Int63n(0).
+	for i := 0; i < 20; i++ {
+		_ = delivery.Backoff(0, 0, time.Nanosecond, time.Second, rand.New(rand.NewSource(int64(i)))) //nolint:gosec // seeds
 	}
 	if got := delivery.Backoff(100, 0, time.Second, 10*time.Second, nil); got != 10*time.Second {
 		t.Fatalf("max = %s", got)

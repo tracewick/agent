@@ -39,8 +39,10 @@ make build
 - Never claim “highload-ready” or production readiness ahead of milestones.
 - English only. Conventional Commits. Do not hand-edit `CHANGELOG.md`.
 - Git flow: branch `feature/*` from `develop`, open PRs into `develop`.
-- After opening or pushing a PR, babysit checks (`gh pr checks`, Codecov) until
-  green; fix failures yourself. Report only when review-ready or blocked on a
+- After opening or pushing a PR, **babysit to completion** (see
+  `.cursor/rules/pr-babysit.mdc`): watch CI, fix failures, triage Codecov and
+  review comments, and **tick PR/Docmost checklist boxes only when evidence is
+  true**. Do not stop at "pushed". Report only when review-ready or blocked on a
   secret/decision.
 
 ## Releasing

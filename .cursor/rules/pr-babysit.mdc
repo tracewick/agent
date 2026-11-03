@@ -1,0 +1,35 @@
+---
+description: After opening or pushing a PR, babysit CI/Codecov/comments and keep checklists honest
+alwaysApply: true
+---
+
+# PR babysit (required)
+
+When you open a PR, push to an open PR, or the user invokes `/autopilot`, you **own** the PR until it is review-ready or blocked on a human secret/decision. Do not stop at "pushed" or "CI started".
+
+## Loop (strict order)
+
+1. Refresh live state: `gh pr view`, `gh pr checks` (never reuse stale conclusions).
+2. Conflicts → resolve (or ask if intents clash).
+3. Unresolved review/Bugbot/Codecov comment threads → fix, dismiss with reason, or ask the user (never guess on security/auth).
+4. Failing required CI → read the failing log, fix in-scope, verify locally, push. Do not weaken CI config to go green.
+5. If checks are still running and there is nothing else to do → `gh pr checks --watch` (or equivalent wait), then re-evaluate.
+
+## Checklists
+
+- Leave PR-body / template checklist items **unchecked** until the matching evidence is true.
+- As soon as required CI is green, **edit the PR body** and tick `make ci` / `Checks` / coverage items that are actually satisfied.
+- Keep Docmost go-agent §5 checkboxes in sync when a milestone/bootstrap item lands on `develop`/`main`.
+- Never tick "after merge" / secret-install items before the human did them.
+
+## Codecov
+
+- Treat `codecov/project` and `codecov/patch` as first-class gates when present.
+- On Codecov comments or red patch/project: inspect the report, add/adjust tests or justify exclusions in-repo — do not ignore.
+- If `CODECOV_TOKEN` is missing and upload is silent, say so once and keep babysitting the rest; do not pretend coverage gates passed.
+
+## Reporting
+
+- End a babysit pass with: mergeable? required checks? open threads? checklist ticks updated?
+- Never merge, enable auto-merge, or mark ready-for-review unless the user asks.
+- Only ask the maintainer to watch CI when blocked on a secret, permission, or product decision.

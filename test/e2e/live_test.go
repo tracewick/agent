@@ -3,18 +3,12 @@
 package e2e_test
 
 import (
-	"bytes"
-	"context"
 	"crypto/rand"
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
-	"net/http"
-	"os/exec"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -22,7 +16,9 @@ import (
 )
 
 // TestLivePyroscopeRoundTrip pushes via a real agent into stand Pyroscope, then
-// asserts Querier LabelValues (parity with PHP PyroscopeSinkTest).
+// asserts Querier readback at check-profiles.sh depth: LabelValues, ProfileTypes
+// (wall:nanoseconds), SelectMergeStacktraces with fixture frames, and no raw URLs
+// in LabelNames (parity with main-repo PyroscopeSinkTest + reference-app check).
 func TestLivePyroscopeRoundTrip(t *testing.T) {
 	pyroscope, _, _, ok := standEnv()
 	if !ok {
@@ -38,39 +34,60 @@ func TestLivePyroscopeRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	labels := map[string]string{}
+	for k, v := range base.Labels {
+		labels[k] = v
+	}
+	// Coarse route label (SinkTest / check-profiles style); never a raw URL.
+	labels["http.route"] = "/posts/{id}"
+
 	body := buildSpoolBytes(t, map[string]any{
 		"application": app,
 		"event_type":  string(base.EventType),
 		"period_ns":   base.PeriodNs,
 		"start_ns":    startNs,
 		"end_ns":      endNs,
-		"labels":      base.Labels,
+		"labels":      labels,
 		"format":      spool.FormatCompactStacks,
 	}, base.Payload)
 
 	bin := agentBinary(t)
 	spoolDir := filepath.Join(t.TempDir(), "spool")
 	seedSpool(t, spoolDir, body, 1)
+	logf(t, "live push app=%s spool=%s pyroscope=%s", app, spoolDir, pyroscope)
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, bin, "run", //nolint:gosec // test binary
-		"--spool-dir="+spoolDir,
-		"--pyroscope-url="+pyroscope,
+	if _, err := runAgentLogged(t, bin, []string{
+		"run",
+		"--spool-dir=" + spoolDir,
+		"--pyroscope-url=" + pyroscope,
 		"--reader-id=e2e-live",
 		"--once",
-	)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		t.Fatalf("agent: %v\n%s", err, out)
+	}, 2*time.Minute); err != nil {
+		t.Fatalf("agent live push: %v", err)
 	}
+	logSpool(t, spoolDir, "after live push")
 	if left := listSpoolLeftovers(t, spoolDir); len(left) != 0 {
 		t.Fatalf("spool leftovers after live push: %v", left)
 	}
 
-	assertLabelValues(t, pyroscope, "service_name", app, startNs, []string{app})
-	assertLabelValues(t, pyroscope, "pyroscope_spy", app, startNs, []string{"tracewick"})
-	assertLabelValues(t, pyroscope, "service", app, startNs, []string{"blog"})
+	waitLabelValues(t, pyroscope, "service_name", app, startNs, []string{app})
+	waitLabelValues(t, pyroscope, "pyroscope_spy", app, startNs, []string{"tracewick"})
+	waitLabelValues(t, pyroscope, "service", app, startNs, []string{"blog"})
+	waitLabelValues(t, pyroscope, "http_route", app, startNs, []string{"/posts/{id}"})
+
+	aroundMs := startNs / 1_000_000
+	names := querierPOST(t, pyroscope, "LabelNames", map[string]any{
+		"matchers": []string{fmt.Sprintf(`{service_name="%s"}`, app)},
+		"start":    aroundMs - 60_000,
+		"end":      aroundMs + 60_000,
+	})
+	assertNoRawURLsInJSON(t, "LabelNames", names)
+	nameList := stringList(names["names"])
+	logf(t, "LabelNames=%v", nameList)
+
+	typeID := waitWallProfileTypeID(t, pyroscope, startNs)
+	waitSelectMergeHasFrame(t, pyroscope, typeID, app, `PostController::show`, startNs)
+	logf(t, "live Querier round-trip OK for %s", app)
 }
 
 func buildSpoolBytes(t *testing.T, header map[string]any, payload []byte) []byte {
@@ -103,75 +120,11 @@ func randomHex(t *testing.T, n int) string {
 	return hex.EncodeToString(b)
 }
 
-func assertLabelValues(t *testing.T, baseURL, labelName, application string, aroundNs int64, want []string) {
-	t.Helper()
-	aroundMs := aroundNs / 1_000_000
-	reqBody := map[string]any{
-		"name":     labelName,
-		"matchers": []string{fmt.Sprintf(`{service_name="%s"}`, application)},
-		"start":    aroundMs - 60_000,
-		"end":      aroundMs + 60_000,
-	}
-	deadline := time.Now().Add(90 * time.Second)
-	var got []string
-	for {
-		got = querierLabelValues(t, baseURL, reqBody)
-		if len(got) > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("timeout waiting for LabelValues %s (service_name=%s)", labelName, application)
-		}
-		time.Sleep(200 * time.Millisecond)
-	}
-	if !stringSlicesEqual(got, want) {
-		t.Fatalf("LabelValues %s = %#v; want %#v", labelName, got, want)
-	}
-}
-
-func querierLabelValues(t *testing.T, baseURL string, body map[string]any) []string {
-	t.Helper()
-	raw, err := json.Marshal(body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	url := strings.TrimRight(baseURL, "/") + "/querier.v1.QuerierService/LabelValues"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(raw))
-	if err != nil {
-		t.Fatal(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	res, err := http.DefaultClient.Do(req)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer res.Body.Close()
-	payload, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.StatusCode < 200 || res.StatusCode > 299 {
-		t.Fatalf("querier %s: %s %s", url, res.Status, payload)
-	}
-	var decoded struct {
-		Names []string `json:"names"`
-	}
-	if err := json.Unmarshal(payload, &decoded); err != nil {
-		t.Fatalf("querier decode: %v body=%s", err, payload)
-	}
-	return decoded.Names
-}
-
-func stringSlicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
+func containsString(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
 		}
 	}
-	return true
+	return false
 }

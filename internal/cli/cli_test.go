@@ -99,3 +99,38 @@ func TestRunAgentBadConfig(t *testing.T) {
 		t.Fatal("expected config error")
 	}
 }
+
+func TestRunAgentShutdownOnCancel(t *testing.T) {
+	dir := t.TempDir()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	var errOut bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- cli.RunContext(ctx, []string{
+			"run", "--reader-id=cli-shutdown",
+			"--spool-dir=" + dir,
+			"--pyroscope-url=" + srv.URL,
+			"--sleep=50ms",
+			"--shutdown-grace=20ms",
+		}, io.Discard, &errOut)
+	}()
+	// Let the idle loop start, then cancel like SIGTERM via Notify(parent).
+	time.Sleep(80 * time.Millisecond)
+	cancel()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("want clean shutdown, got %v\n%s", err, errOut.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("agent did not exit after cancel")
+	}
+	if !strings.Contains(errOut.String(), "shutdown complete") {
+		t.Fatalf("stderr missing shutdown complete: %s", errOut.String())
+	}
+}

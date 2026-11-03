@@ -26,6 +26,7 @@ func TestTwoAgentsOneSpool(t *testing.T) {
 	spoolDir := filepath.Join(t.TempDir(), "spool")
 	const files = 24
 	seedSpool(t, spoolDir, fixtureBytes(t, "web-request.spool"), files)
+	logf(t, "two-agents: spool=%s files=%d (httptest claim race)", spoolDir, files)
 
 	var posts atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -72,13 +73,15 @@ func TestTwoAgentsOneSpool(t *testing.T) {
 		if res.err != nil {
 			t.Fatalf("agent %s: %v\nstderr:\n%s", res.reader, res.err, res.stderr)
 		}
-		t.Logf("agent %s ok; stderr snippet: %q", res.reader, trimLog(res.stderr, 200))
+		logf(t, "agent %s ok; %s", res.reader, trimLog(res.stderr, 200))
 	}
 
+	logSpool(t, spoolDir, "after two-agents")
 	if left := listSpoolLeftovers(t, spoolDir); len(left) != 0 {
 		t.Fatalf("spool leftovers after dual drain: %v", left)
 	}
 	got := posts.Load()
+	logf(t, "two-agents: pyroscope POSTs=%d (want 1 or 2)", got)
 	if got < 1 || got > 2 {
 		// Same aggregation key → one POST if a single agent claimed everything,
 		// or two if work split. More than two would mean unexpected double-delivery

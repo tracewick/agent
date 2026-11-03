@@ -40,10 +40,13 @@ func TestStandToxicChaosSuite(t *testing.T) {
 		}
 		spoolDir := filepath.Join(t.TempDir(), "spool")
 		seedSpool(t, spoolDir, fixtureBytes(t, "web-request.spool"), 1)
+		logf(t, "chaos/healthy: push via toxic URL %s", toxic)
 		out, err := runAgentOnce(t, bin, spoolDir, toxic, "e2e-chaos-ok", 45*time.Second)
 		if err != nil {
 			t.Fatalf("healthy toxic proxy: %v\n%s", err, out)
 		}
+		logf(t, "chaos/healthy: ok; %s", trimLog(string(out), 200))
+		logSpool(t, spoolDir, "chaos/healthy")
 		if left := listSpoolLeftovers(t, spoolDir); len(left) != 0 {
 			t.Fatalf("leftovers after healthy push: %v", left)
 		}
@@ -97,6 +100,7 @@ func TestStandToxicChaosSuite(t *testing.T) {
 			}
 			spoolDir := filepath.Join(t.TempDir(), "spool")
 			seedSpool(t, spoolDir, fixtureBytes(t, "web-request.spool"), 1)
+			logf(t, "chaos/%s: toxic %s/%s attrs=%v", tc.name, tc.typ, tc.stream, tc.attrs)
 
 			start := time.Now()
 			out, err := runAgentOnce(t, bin, spoolDir, toxic, "e2e-chaos-"+tc.name, 45*time.Second)
@@ -104,9 +108,11 @@ func TestStandToxicChaosSuite(t *testing.T) {
 			if err == nil {
 				t.Fatalf("expected failure under %s; out:\n%s", tc.name, out)
 			}
+			logf(t, "chaos/%s: failed as expected in %s; %s", tc.name, elapsed.Round(time.Millisecond), trimLog(string(out), 200))
 			if elapsed > tc.maxElapsed {
 				t.Fatalf("%s: agent wall %v > %v\n%s", tc.name, elapsed, tc.maxElapsed, out)
 			}
+			logSpool(t, spoolDir, "chaos/"+tc.name)
 			if left := listSpoolLeftovers(t, spoolDir); len(left) == 0 {
 				t.Fatalf("%s: expected spool leftover after failed delivery; out:\n%s", tc.name, out)
 			}
@@ -168,6 +174,7 @@ func TestProcessKillLeavesClaimThenStaleReclaim(t *testing.T) {
 		close(releasePush)
 		t.Fatal("timed out waiting for claim before kill")
 	}
+	logf(t, "kill/reclaim: claimed %s; sending SIGKILL", claimed)
 
 	if err := cmd.Process.Signal(os.Kill); err != nil { // kill -9
 		t.Fatal(err)
@@ -175,6 +182,7 @@ func TestProcessKillLeavesClaimThenStaleReclaim(t *testing.T) {
 	_, _ = cmd.Process.Wait()
 	close(releasePush)
 
+	logSpool(t, spoolDir, "after SIGKILL")
 	if left := listSpoolLeftovers(t, spoolDir); len(left) == 0 {
 		t.Fatal("expected claimed leftover after kill -9")
 	}
@@ -182,11 +190,13 @@ func TestProcessKillLeavesClaimThenStaleReclaim(t *testing.T) {
 	if err := forgeStaleClaimEpoch(spoolDir, 15*time.Minute); err != nil {
 		t.Fatal(err)
 	}
+	logf(t, "kill/reclaim: forged stale epoch; second agent reclaiming")
 
 	out, err := runAgentOnce(t, bin, spoolDir, srv.URL, "e2e-reclaim", 45*time.Second)
 	if err != nil {
 		t.Fatalf("reclaim agent: %v\n%s", err, out)
 	}
+	logSpool(t, spoolDir, "after reclaim")
 	if left := listSpoolLeftovers(t, spoolDir); len(left) != 0 {
 		t.Fatalf("leftovers after stale reclaim: %v", left)
 	}

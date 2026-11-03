@@ -51,6 +51,7 @@ func agentBinary(t *testing.T) string {
 	if agentBinErr != nil {
 		t.Fatalf("build agent: %v", agentBinErr)
 	}
+	t.Logf("e2e: agent binary %s", agentBinPath)
 	return agentBinPath
 }
 

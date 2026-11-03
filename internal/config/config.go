@@ -45,6 +45,7 @@ type Config struct {
 	MaxBatchInputBytes   int64
 	HTTPTimeout          time.Duration
 	ShutdownGrace        time.Duration
+	MaxRejectedFiles     int // kept under spool rejected/; 0 deletes on reject
 	MaxCardinality       int
 	MetricsListen        string // optional host:port for Prometheus /metrics; empty disables
 	TLSCAFile            string // optional PEM CA bundle for HTTPS to Pyroscope
@@ -72,6 +73,7 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 		MaxBatchInputBytes:   defaultMaxBatchBytes,
 		HTTPTimeout:          defaultHTTPTimeout,
 		ShutdownGrace:        delivery.DefaultShutdownGrace,
+		MaxRejectedFiles:     spool.DefaultMaxRejectedFiles,
 		MaxCardinality:       defaultMaxCardinality,
 	}
 
@@ -170,6 +172,38 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 				return Config{}, err
 			}
 			cfg.TLSCAFile = v
+		case strings.HasPrefix(arg, "--shutdown-grace="):
+			d, err := time.ParseDuration(strings.TrimPrefix(arg, "--shutdown-grace="))
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --shutdown-grace: %w", err)
+			}
+			cfg.ShutdownGrace = d
+		case arg == "--shutdown-grace":
+			v, err := needValue(args, &i, arg)
+			if err != nil {
+				return Config{}, err
+			}
+			d, err := time.ParseDuration(v)
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --shutdown-grace: %w", err)
+			}
+			cfg.ShutdownGrace = d
+		case strings.HasPrefix(arg, "--max-rejected-files="):
+			n, err := strconv.Atoi(strings.TrimPrefix(arg, "--max-rejected-files="))
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-rejected-files: %w", err)
+			}
+			cfg.MaxRejectedFiles = n
+		case arg == "--max-rejected-files":
+			v, err := needValue(args, &i, arg)
+			if err != nil {
+				return Config{}, err
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-rejected-files: %w", err)
+			}
+			cfg.MaxRejectedFiles = n
 		case strings.HasPrefix(arg, "--pyroscope-password="), arg == "--pyroscope-password":
 			return Config{}, errors.New("config: do not pass the Pyroscope password on the command line; set " + envPyroscopePassword)
 		default:
@@ -205,6 +239,12 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	if cfg.Sleep < 0 {
 		return Config{}, errors.New("config: --sleep must be non-negative")
 	}
+	if cfg.ShutdownGrace < 0 {
+		return Config{}, errors.New("config: --shutdown-grace must be non-negative")
+	}
+	if cfg.MaxRejectedFiles < 0 || cfg.MaxRejectedFiles > 100_000 {
+		return Config{}, errors.New("config: --max-rejected-files must be between 0 and 100000")
+	}
 	return cfg, nil
 }
 
@@ -221,6 +261,8 @@ Options:
   --reader-id=ID                claim reader id (default: host-pid)
   --aggregation-window=S        merge window 10–15 seconds (default: 15)
   --sleep=DURATION              idle poll delay (default: 5s)
+  --shutdown-grace=DURATION     finish in-flight work after SIGTERM (default: 30s)
+  --max-rejected-files=N        keep up to N files under rejected/ (default: 100; 0 deletes)
   --metrics-listen=ADDR         Prometheus /metrics bind (env TRACEWICK_METRICS_LISTEN; empty disables)
   --tls-ca=PATH                 extra PEM CA roots for HTTPS (env TRACEWICK_TLS_CA)
   --once                        deliver one pass and exit

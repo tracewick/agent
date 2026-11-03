@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -81,6 +82,13 @@ func runAgent(parent context.Context, args []string, stdout, stderr io.Writer) e
 	workCtx, cancelGrace := delivery.WithGrace(ctx, cfg.ShutdownGrace)
 	defer cancelGrace()
 
-	_, _ = fmt.Fprintf(stderr, "tracewick-agent %s starting (spool=%s reader=%s)\n", version.String(), cfg.SpoolDir, cfg.ReaderID)
-	return a.Run(workCtx)
+	_, _ = fmt.Fprintf(stderr, "tracewick-agent %s starting (spool=%s reader=%s grace=%s)\n",
+		version.String(), cfg.SpoolDir, cfg.ReaderID, cfg.ShutdownGrace)
+	err = a.Run(workCtx)
+	if errors.Is(err, context.Canceled) {
+		// SIGTERM/SIGINT after shutdown grace — clean process exit.
+		_, _ = fmt.Fprintln(stderr, "tracewick-agent shutdown complete")
+		return nil
+	}
+	return err
 }

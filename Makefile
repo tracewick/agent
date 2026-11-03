@@ -5,6 +5,10 @@ GOLANGCI_LINT ?= golangci-lint
 GOLANGCI_LINT_VERSION ?= v2.15.0
 GOVULNCHECK ?= govulncheck
 GOFUMPT ?= gofumpt
+GREMLINS ?= gremlins
+GREMLINS_VERSION ?= v0.6.0
+# Core packages for the MSI gate (expand carefully; never lower .gremlins.yaml thresholds).
+MUTATION_PACKAGES ?= ./internal/delivery ./internal/aggregate ./internal/spool
 
 COVER_PROFILE ?= build/coverage/coverage.out
 # cmd/ is a thin main; coverage gates apply to internal packages (library parity).
@@ -16,7 +20,7 @@ PHP_DRAIN_DIR ?= $(CURDIR)/.cache/php-drain
 PHP_DRAIN_BIN ?= $(PHP_DRAIN_DIR)/vendor/bin/tracewick-drain
 
 .PHONY: help tidy fmt fmt-check lint vuln test test-race coverage ci build docker-build e2e \
-	stand-up stand-down stand-smoke pprof-check fuzz-smoke php-drain
+	stand-up stand-down stand-smoke pprof-check fuzz-smoke php-drain mutation
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-14s %s\n", $$1, $$2}'
@@ -98,5 +102,12 @@ pprof-check: ## Validate testdata/pprof/*.pb with go tool pprof (library CI pari
 
 fuzz-smoke: ## Short SpoolFile fuzz run for CI
 	$(GO) test ./internal/spool/ -fuzz=FuzzParse -fuzztime=15s
+
+mutation: ## Gremlins MSI gate on core packages (.gremlins.yaml thresholds)
+	@command -v $(GREMLINS) >/dev/null || $(GO) install github.com/go-gremlins/gremlins/cmd/gremlins@$(GREMLINS_VERSION)
+	@for pkg in $(MUTATION_PACKAGES); do \
+		echo "==> gremlins unleash $$pkg"; \
+		$(GREMLINS) unleash $$pkg || exit $$?; \
+	done
 
 ci: tidy fmt-check lint vuln test-race coverage pprof-check ## Local PR gate (mirrors Checks)

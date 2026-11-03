@@ -12,8 +12,11 @@ COVER_PACKAGES ?= ./internal/...
 
 DOCKER_IMAGE ?= tracewick-agent:local
 
+PHP_DRAIN_DIR ?= $(CURDIR)/.cache/php-drain
+PHP_DRAIN_BIN ?= $(PHP_DRAIN_DIR)/vendor/bin/tracewick-drain
+
 .PHONY: help tidy fmt fmt-check lint vuln test test-race coverage ci build docker-build e2e \
-	stand-up stand-down stand-smoke pprof-check fuzz-smoke
+	stand-up stand-down stand-smoke pprof-check fuzz-smoke php-drain
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-14s %s\n", $$1, $$2}'
@@ -58,8 +61,23 @@ build: ## Build the tracewick-agent binary into bin/
 docker-build: ## Build the local container image (tracewick-agent:local)
 	docker build -t $(DOCKER_IMAGE) .
 
+php-drain: ## Install Packagist tracewick/tracewick for Go+PHP-drain e2e
+	@command -v composer >/dev/null || (echo 'composer required for make php-drain' && exit 1)
+	@command -v php >/dev/null || (echo 'php required for make php-drain' && exit 1)
+	mkdir -p $(PHP_DRAIN_DIR)
+	@if [ ! -f $(PHP_DRAIN_DIR)/composer.json ]; then \
+		printf '%s\n' '{"name":"tracewick/agent-e2e-drain","require":{"tracewick/tracewick":"^0.1"},"config":{"sort-packages":true}}' \
+			> $(PHP_DRAIN_DIR)/composer.json; \
+	fi
+	cd $(PHP_DRAIN_DIR) && composer update --no-interaction --no-progress --prefer-dist --no-dev
+	@test -x $(PHP_DRAIN_BIN) || test -f $(PHP_DRAIN_BIN)
+
 e2e: ## Cross-process E2E (build tag e2e; not part of make ci)
-	$(GO) test -tags=e2e -count=1 -timeout=5m ./test/e2e/
+	@if [ -f "$(PHP_DRAIN_BIN)" ]; then \
+		TRACEWICK_DRAIN_BIN="$(PHP_DRAIN_BIN)" $(GO) test -tags=e2e -count=1 -timeout=5m ./test/e2e/; \
+	else \
+		$(GO) test -tags=e2e -count=1 -timeout=5m ./test/e2e/; \
+	fi
 
 stand-up: ## Start Pyroscope + Toxiproxy (127.0.0.1)
 	docker compose up -d --wait

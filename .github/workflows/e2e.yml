@@ -32,6 +32,15 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.4"
+          tools: composer
+          coverage: none
+
+      - name: Prepare PHP tracewick-drain
+        run: make php-drain
+
       - name: Start stand (Pyroscope + Toxiproxy)
         run: make stand-up
 
@@ -40,6 +49,8 @@ jobs:
 
       - name: Cross-process E2E
         run: make e2e
+        env:
+          TRACEWICK_DRAIN_BIN: ${{ github.workspace }}/.cache/php-drain/vendor/bin/tracewick-drain
 
       - name: Stop stand
         if: ${{ always() }}

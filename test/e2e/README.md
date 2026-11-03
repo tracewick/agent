@@ -28,7 +28,7 @@ cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick
 
 | Concern | Approach |
 | --- | --- |
-| Claim coexistence | Real processes, one spool dir (two Go agents; later Go + `tracewick-drain`) |
+| Claim coexistence | Real processes, one spool dir (two Go agents; Go + `tracewick-drain`) |
 | Pyroscope faults | **Toxiproxy** (`timeout` / `latency` / `reset_peer` / …) via `PYROSCOPE_TOXIC_URL` |
 | Healthy push | `PYROSCOPE_URL`; Querier asserts still to land |
 | Missing stand | Skip when stand env unset |
@@ -38,6 +38,17 @@ cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick
 ## Status
 
 - Done: two Go agents (httptest); stand compose + smoke; toxic timeout chaos smoke;
-  live Querier LabelValues round-trip (`TestLivePyroscopeRoundTrip`).
-- Next: Go + PHP-drain; expand Toxiproxy/process chaos; FakeHttp-class HTTP faults;
-  mutation gate.
+  live Querier LabelValues round-trip (`TestLivePyroscopeRoundTrip`);
+  Go + PHP `tracewick-drain` claim coexistence (`TestGoAndPHPDrainOneSpool`, needs
+  `TRACEWICK_DRAIN_BIN` / `make php-drain` / sibling `../tracewick`).
+- Next: expand Toxiproxy/process chaos; FakeHttp-class HTTP faults; mutation gate.
+
+## PHP drain for local E2E
+
+```bash
+make php-drain          # composer → .cache/php-drain/vendor/bin/tracewick-drain
+make e2e                # exports TRACEWICK_DRAIN_BIN when that binary exists
+```
+
+Or point at a main-repo checkout: `export TRACEWICK_DRAIN_BIN=../tracewick/bin/tracewick-drain`.
+Without a drain binary the Go+PHP test **skips**; other e2e cases still run.

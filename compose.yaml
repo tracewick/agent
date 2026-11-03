@@ -1,0 +1,28 @@
+# Development and test stand for tracewick-agent (parity with tracewick/tracewick).
+#
+#   make stand-up     start Pyroscope + Toxiproxy
+#   make stand-smoke  check wiring
+#   make stand-down   stop and remove volumes
+#
+# Ports bind to 127.0.0.1 only. Ops UID examples stay under deploy/.
+
+name: tracewick-agent
+
+services:
+  pyroscope:
+    image: grafana/pyroscope:2.4.2
+    # Distroless: poll /ready from the host (see docker/wait-for-url.sh).
+    ports:
+      - 127.0.0.1:4040:4040
+
+  # Fault injection between the agent and Pyroscope (chaos / timeout budgets).
+  toxiproxy:
+    image: ghcr.io/shopify/toxiproxy:2.13.0
+    depends_on: [pyroscope]
+    command: [-host=0.0.0.0, -config=/etc/toxiproxy/toxiproxy.json]
+    volumes:
+      - ./docker/toxiproxy/toxiproxy.json:/etc/toxiproxy/toxiproxy.json:ro
+    ports:
+      - 127.0.0.1:8474:8474
+      # Host-side toxic Pyroscope listen (same port as in-stand listen).
+      - 127.0.0.1:14040:14040

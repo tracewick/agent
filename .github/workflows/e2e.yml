@@ -15,12 +15,15 @@ concurrency:
 
 env:
   GO_VERSION: "1.27.3"
+  PYROSCOPE_URL: http://127.0.0.1:4040
+  PYROSCOPE_TOXIC_URL: http://127.0.0.1:14040
+  TOXIPROXY_URL: http://127.0.0.1:8474
 
 jobs:
   e2e:
     name: E2E
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
 
@@ -29,5 +32,15 @@ jobs:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
+      - name: Start stand (Pyroscope + Toxiproxy)
+        run: make stand-up
+
+      - name: Stand smoke
+        run: make stand-smoke
+
       - name: Cross-process E2E
         run: make e2e
+
+      - name: Stop stand
+        if: ${{ always() }}
+        run: make stand-down

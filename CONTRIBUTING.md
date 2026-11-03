@@ -10,8 +10,25 @@ engineering and release discipline as
 files, aggregates them, encodes **pprof**, and pushes to Pyroscope. The PHP
 library and `tracewick-drain` remain the spool writers / reference drain.
 
-> **Early development.** Do not claim production or highload readiness until a
-> tagged release and the maintainers say so.
+> **Pre-tag status.** The README may say early development until the first
+> `v0.x` (alpha) tag. That label is **not** permission to skip repository
+> lifecycle: stand / Toxiproxy / live Querier / mutation+fuzz+pprof CI / real
+> GoReleaser cuts are the path to alpha. Do not claim production or highload
+> readiness until a tagged release and the maintainers say so.
+
+## Path to alpha
+
+Treat upcoming work as **alpha readiness**, not sandbox polish:
+
+| Contour | Expectation |
+| --- | --- |
+| Delivery proof | Stand + Toxiproxy chaos + Querier live + Go ↔ PHP-drain (see `test/e2e/`) |
+| Test proof | Coverage gates **and** fuzz / `go tool pprof` / mutation (Gremlins or go-mutesting) on core |
+| Release machine | release-please + GoReleaser actually cut artifacts; honest unsigned alpha until cosign |
+| Load truth | Soak/load via [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks), not a weak mini-soak here |
+
+Each PR should be a lifecycle slice toward that table. httptest is fine for unit and
+claim-smoke only.
 
 ## Commands
 
@@ -26,6 +43,31 @@ make e2e         # cross-process E2E (separate from make ci; CI workflow e2e.yml
 Before every push, run what CI would catch on your change. Prefer `make ci`.
 Do not push blind and fix lint on GitHub. Touching spool claim or the agent
 loop: also run `make e2e`.
+
+Cross-process E2E details and **Toxiproxy / stand parity** with
+[`tracewick/tracewick`](https://github.com/tracewick/tracewick) (not httptest for
+network chaos): see [`test/e2e/README.md`](test/e2e/README.md).
+
+## Development stand
+
+Same idea as the main repo stand, slimmed to what the agent needs:
+
+```bash
+make stand-up      # Pyroscope + Toxiproxy on 127.0.0.1
+make stand-smoke   # /ready + proxy wiring
+make e2e           # claim-smoke + stand tests (stand tests skip without env)
+make stand-down
+```
+
+| From the host | Purpose |
+| --- | --- |
+| http://127.0.0.1:4040 | Pyroscope (`PYROSCOPE_URL`) |
+| http://127.0.0.1:14040 | Pyroscope via Toxiproxy (`PYROSCOPE_TOXIC_URL`) |
+| http://127.0.0.1:8474 | Toxiproxy API (`TOXIPROXY_URL`) |
+
+Export those three when running stand-backed E2E locally (CI `e2e.yml` sets them).
+UID-compatible deploy examples remain under [`deploy/`](deploy/) — that is ops
+shape, not the development stand.
 
 ## Rules
 

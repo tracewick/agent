@@ -1,0 +1,8 @@
+[
+  {
+    "name": "pyroscope",
+    "listen": "0.0.0.0:14040",
+    "upstream": "pyroscope:4040",
+    "enabled": true
+  }
+]

@@ -69,6 +69,14 @@ jobs:
           go test -race -covermode=atomic -coverprofile=build/coverage/coverage.out ./internal/...
           go tool cover -func=build/coverage/coverage.out
 
+      - name: Validate pprof golden files with go tool pprof
+        if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
+        run: make pprof-check
+
+      - name: Fuzz smoke (SpoolFile parse)
+        if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
+        run: make fuzz-smoke
+
       - name: Upload coverage to Codecov
         if: ${{ !cancelled() && steps.tests.outcome == 'success' }}
         uses: codecov/codecov-action@v5

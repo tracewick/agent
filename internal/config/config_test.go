@@ -253,9 +253,24 @@ func TestLoadShutdownGraceAndMaxRejected(t *testing.T) {
 		t.Fatal("want max-rejected bounds error")
 	}
 	if _, err := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x", "--max-rejected-files=100001",
+	}, empty); err == nil {
+		t.Fatal("want max-rejected upper bound error")
+	}
+	if _, err := config.Load([]string{
 		"--spool-dir=/s", "--pyroscope-url=http://x", "--shutdown-grace=-1s",
 	}, empty); err == nil {
 		t.Fatal("want grace bounds error")
+	}
+	if _, err := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x", "--shutdown-grace", "nope",
+	}, empty); err == nil {
+		t.Fatal("want grace sep parse error")
+	}
+	if _, err := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x", "--max-rejected-files", "nope",
+	}, empty); err == nil {
+		t.Fatal("want max-rejected sep parse error")
 	}
 }
 

@@ -35,7 +35,8 @@ var hashOf = func(k Key) string { return k.Hash() }
 // GroupBy buckets members by header hash + window id.
 //
 // The filename hash is only a hint: GroupBy always hashes headers and rejects a member when a
-// hint is present and disagrees. Blind merge by filename prefix is forbidden (Docmost §2.5).
+// hint is present and disagrees. Blind merge by filename prefix is forbidden
+// (ADR 12: hash is a hint; re-validate headers before merge).
 func GroupBy(window *Window, members []Member) ([]Group, error) {
 	if window == nil {
 		return nil, fmt.Errorf("aggregate: window is required")

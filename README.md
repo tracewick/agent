@@ -12,8 +12,9 @@ encodes **pprof**, and pushes via the Pyroscope Push API.
 
 ## Status
 
-Bootstrap / enterprise floor is being established (git flow, strict CI, lint,
-coverage gates). Delivery pipeline work starts after that (Docmost `go-agent` M1).
+Early development: git flow, strict CI, lint, and coverage gates are in place.
+Spool parse/claim, aggregation, and pprof encode land package by package; the
+binary is not production-ready yet.
 
 ## Develop
 

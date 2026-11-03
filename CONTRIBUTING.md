@@ -10,8 +10,8 @@ engineering and release discipline as
 files, aggregates them, encodes **pprof**, and pushes to Pyroscope. The PHP
 library and `tracewick-drain` remain the spool writers / reference drain.
 
-> **Early development.** Do not claim production or highload readiness until the
-> Docmost `go-agent` milestones say so.
+> **Early development.** Do not claim production or highload readiness until a
+> tagged release and the maintainers say so.
 
 ## Commands
 

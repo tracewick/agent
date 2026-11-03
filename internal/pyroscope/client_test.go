@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/tracewick/agent/internal/pyroscope"
 	"github.com/tracewick/agent/internal/spool"
@@ -92,6 +93,7 @@ func TestClientPushNon2xx(t *testing.T) {
 	t.Parallel()
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Retry-After", "7")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_, _ = w.Write([]byte("slow down"))
 	}))
@@ -111,8 +113,33 @@ func TestClientPushNon2xx(t *testing.T) {
 	if !errors.As(err, &st) {
 		t.Fatalf("want StatusError, got %v", err)
 	}
-	if st.StatusCode != http.StatusTooManyRequests || st.Body != "slow down" {
+	if st.StatusCode != http.StatusTooManyRequests || st.Body != "slow down" || st.RetryAfter != 7*time.Second {
 		t.Fatalf("%#v", st)
+	}
+}
+
+func TestParseRetryAfter(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 11, 3, 12, 0, 0, 0, time.UTC)
+	if d := pyroscope.ParseRetryAfter("12", now); d != 12*time.Second {
+		t.Fatal(d)
+	}
+	if d := pyroscope.ParseRetryAfter("-1", now); d != 0 {
+		t.Fatal(d)
+	}
+	if d := pyroscope.ParseRetryAfter("", now); d != 0 {
+		t.Fatal(d)
+	}
+	if d := pyroscope.ParseRetryAfter("not-a-date", now); d != 0 {
+		t.Fatal(d)
+	}
+	future := now.Add(30 * time.Second).Format(http.TimeFormat)
+	if d := pyroscope.ParseRetryAfter(future, now); d < 29*time.Second || d > 31*time.Second {
+		t.Fatal(d)
+	}
+	past := now.Add(-time.Minute).Format(http.TimeFormat)
+	if d := pyroscope.ParseRetryAfter(past, now); d != 0 {
+		t.Fatal(d)
 	}
 }
 

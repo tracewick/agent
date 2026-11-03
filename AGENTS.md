@@ -6,8 +6,9 @@ Instructions for AI coding agents working on this repository. Humans should read
 ## Project
 
 Tracewick Agent (`github.com/tracewick/agent`, binary `tracewick-agent`) delivers
-profiles from a local Tracewick spool to Pyroscope. Canon: Docmost page
-`go-agent` and the PHP library docs (`spool-format.md`, ADRs 5, 7, 9, 12, 13).
+profiles from a local Tracewick spool to Pyroscope. Canon: the main repo
+[`tracewick/tracewick`](https://github.com/tracewick/tracewick) docs
+(`docs/spool-format.md`, ADRs 5, 7, 9, 12, 13) and this repository’s CONTRIBUTING.
 
 ## Commands
 
@@ -35,7 +36,9 @@ make build
 - Spool-first; unix socket is v1.1+ with length-prefix framing only.
 - Claim rename: `X.spool` → `.X.spool.claimed-<readerId>-<epoch>`.
 - Ack only after Pyroscope HTTP 2xx; at-least-once; duplicates possible.
-- Do not invent softer HTTP/auth behaviour than Docmost §2.8.
+- HTTP delivery: ack only on 2xx; 408/429/5xx → release+retry; 401/403/404 →
+  keep spool (pause, do not reject as trash); 413 → shrink batch (or reject a
+  single oversized profile); 400 → reject. Do not invent softer auth behaviour.
 - Never claim “highload-ready” or production readiness ahead of milestones.
 - English only. Conventional Commits. Do not hand-edit `CHANGELOG.md`.
 - Git flow: branch `feature/*` from `develop`, open PRs into `develop`.

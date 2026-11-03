@@ -44,7 +44,8 @@ cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick
   live Querier LabelValues (`TestLivePyroscopeRoundTrip`);
   Go + PHP `tracewick-drain` claim coexistence (`TestGoAndPHPDrainOneSpool`, needs
   `TRACEWICK_DRAIN_BIN` / `make php-drain` / sibling `../tracewick`).
-- Next: FakeHttp-class HTTP faults; mutation gate; UID-mismatch chaos (deploy/root).
+- Next: mutation gate; UID-mismatch chaos (deploy/root). FakeHttp-class client faults
+  live under `internal/testhttp` + `internal/pyroscope` (unit, not e2e).
 
 ## PHP drain for local E2E
 

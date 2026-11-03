@@ -29,8 +29,10 @@ make build
   --metrics-listen=127.0.0.1:9090
 ```
 
-Password for Pyroscope basic auth: `TRACEWICK_PYROSCOPE_PASSWORD` in the environment (never argv).
+Password for Pyroscope basic auth: `TRACEWICK_PYROSCOPE_PASSWORD` in the environment (never
+argv; same rule as `tracewick-drain`). Do not put credentials in `--pyroscope-url`.
 Optional Prometheus scrape: `--metrics-listen` / `TRACEWICK_METRICS_LISTEN` serves `GET /metrics`.
+Custom HTTPS CA: `--tls-ca` / `TRACEWICK_TLS_CA` (PEM); verification stays on.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).
 

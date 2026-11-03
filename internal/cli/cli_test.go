@@ -66,9 +66,29 @@ func TestRunAgentOnce(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	var errOut bytes.Buffer
-	args := []string{"run", "--once", "--reader-id=cli-test", "--spool-dir=" + dir, "--pyroscope-url=" + srv.URL}
+	args := []string{
+		"run", "--once", "--reader-id=cli-test",
+		"--spool-dir=" + dir, "--pyroscope-url=" + srv.URL,
+		"--metrics-listen=127.0.0.1:0",
+	}
 	if err := cli.RunContext(ctx, args, io.Discard, &errOut); err != nil {
 		t.Fatalf("%v\n%s", err, errOut.String())
+	}
+	if !strings.Contains(errOut.String(), "metrics listening") {
+		t.Fatalf("stderr missing metrics bind: %s", errOut.String())
+	}
+}
+
+func TestRunAgentMetricsListenBad(t *testing.T) {
+	t.Parallel()
+	err := cli.Run([]string{
+		"run", "--once", "--reader-id=x",
+		"--spool-dir=" + t.TempDir(),
+		"--pyroscope-url=http://127.0.0.1:1",
+		"--metrics-listen=not-a-bind",
+	}, io.Discard, io.Discard)
+	if err == nil {
+		t.Fatal("expected listen error")
 	}
 }
 

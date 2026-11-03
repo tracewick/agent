@@ -11,6 +11,7 @@ import (
 	"github.com/tracewick/agent/internal/aggregate"
 	"github.com/tracewick/agent/internal/config"
 	"github.com/tracewick/agent/internal/delivery"
+	"github.com/tracewick/agent/internal/metrics"
 	"github.com/tracewick/agent/internal/pyroscope"
 	"github.com/tracewick/agent/internal/spool"
 )
@@ -20,13 +21,15 @@ import (
 type Agent struct {
 	cfg     config.Config
 	drainer *Drainer
+	metrics *metrics.Registry
 	log     *slog.Logger
 	now     func() time.Time
 	sleep   func(context.Context, time.Duration) error
 }
 
 // New builds an Agent with a pooled HTTP client (connection reuse) and a Drainer.
-func New(cfg *config.Config, log *slog.Logger, httpClient *http.Client) (*Agent, error) {
+// metrics may be nil (instruments become no-ops).
+func New(cfg *config.Config, log *slog.Logger, httpClient *http.Client, registry *metrics.Registry) (*Agent, error) {
 	if cfg == nil {
 		return nil, fmt.Errorf("agent: config is required")
 	}
@@ -85,12 +88,17 @@ func New(cfg *config.Config, log *slog.Logger, httpClient *http.Client) (*Agent,
 			HTTPTimeout:        cfg.HTTPTimeout,
 			Log:                log,
 			Now:                time.Now,
+			Metrics:            registry,
 		},
-		log:   log,
-		now:   time.Now,
-		sleep: sleepCtx,
+		metrics: registry,
+		log:     log,
+		now:     time.Now,
+		sleep:   sleepCtx,
 	}, nil
 }
+
+// Metrics returns the registry passed to New (may be nil).
+func (a *Agent) Metrics() *metrics.Registry { return a.metrics }
 
 // Run polls until ctx is cancelled, or finishes one productive cycle when cfg.Once.
 func (a *Agent) Run(ctx context.Context) error {
@@ -109,6 +117,7 @@ func (a *Agent) Run(ctx context.Context) error {
 			continue
 		}
 
+		a.refreshSpoolBacklog()
 		res := a.drainer.Drain(ctx)
 		switch res.Outcome {
 		case OutcomePaused:
@@ -147,6 +156,14 @@ func (a *Agent) Run(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+func (a *Agent) refreshSpoolBacklog() {
+	if a.metrics == nil || a.drainer == nil || a.drainer.Source == nil {
+		return
+	}
+	b := a.drainer.Source.Backlog()
+	a.metrics.SetSpoolBacklog(b.Files, b.Bytes, b.OldestAge)
 }
 
 func newHTTPClient(timeout time.Duration) *http.Client {

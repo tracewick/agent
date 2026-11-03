@@ -19,6 +19,7 @@ const (
 	envPyroscopeUser      = "TRACEWICK_PYROSCOPE_USER"
 	envPyroscopePassword  = "TRACEWICK_PYROSCOPE_PASSWORD" //nolint:gosec // env var name, not a secret
 	envPyroscopeTenant    = "TRACEWICK_PYROSCOPE_TENANT"
+	envMetricsListen      = "TRACEWICK_METRICS_LISTEN"
 	defaultSleep          = 5 * time.Second
 	defaultHTTPTimeout    = 10 * time.Second
 	defaultMaxFiles       = 256
@@ -43,7 +44,8 @@ type Config struct {
 	HTTPTimeout          time.Duration
 	ShutdownGrace        time.Duration
 	MaxCardinality       int
-	Once                 bool // one drain pass then exit
+	MetricsListen        string // optional host:port for Prometheus /metrics; empty disables
+	Once                 bool   // one drain pass then exit
 }
 
 // Load parses argv flags and environment. Password is read only from TRACEWICK_PYROSCOPE_PASSWORD.
@@ -57,6 +59,7 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 		PyroscopeUser:        getenv(envPyroscopeUser),
 		PyroscopePassword:    getenv(envPyroscopePassword),
 		PyroscopeTenant:      getenv(envPyroscopeTenant),
+		MetricsListen:        getenv(envMetricsListen),
 		AggregationWindowSec: aggregate.DefaultWindowSeconds,
 		Sleep:                defaultSleep,
 		StaleClaim:           delivery.DefaultStaleClaim,
@@ -147,6 +150,14 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 				return Config{}, fmt.Errorf("config: invalid --sleep: %w", err)
 			}
 			cfg.Sleep = d
+		case strings.HasPrefix(arg, "--metrics-listen="):
+			cfg.MetricsListen = strings.TrimPrefix(arg, "--metrics-listen=")
+		case arg == "--metrics-listen":
+			v, err := needValue(args, &i, arg)
+			if err != nil {
+				return Config{}, err
+			}
+			cfg.MetricsListen = v
 		case strings.HasPrefix(arg, "--pyroscope-password="), arg == "--pyroscope-password":
 			return Config{}, errors.New("config: do not pass the Pyroscope password on the command line; set " + envPyroscopePassword)
 		default:
@@ -195,6 +206,7 @@ Options:
   --reader-id=ID                claim reader id (default: host-pid)
   --aggregation-window=S        merge window 10–15 seconds (default: 15)
   --sleep=DURATION              idle poll delay (default: 5s)
+  --metrics-listen=ADDR         Prometheus /metrics bind (env TRACEWICK_METRICS_LISTEN; empty disables)
   --once                        deliver one pass and exit
   --help                        show this help
 

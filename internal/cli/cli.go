@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"time"
 
 	"github.com/tracewick/agent/internal/agent"
 	"github.com/tracewick/agent/internal/config"
 	"github.com/tracewick/agent/internal/delivery"
+	"github.com/tracewick/agent/internal/metrics"
 	"github.com/tracewick/agent/internal/version"
 )
 
@@ -53,9 +55,23 @@ func runAgent(parent context.Context, args []string, stdout, stderr io.Writer) e
 	}
 
 	log := slog.New(slog.NewTextHandler(stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
-	a, err := agent.New(&cfg, log, nil)
+	reg := metrics.New()
+	a, err := agent.New(&cfg, log, nil, reg)
 	if err != nil {
 		return err
+	}
+
+	metricsSrv, err := metrics.Listen(cfg.MetricsListen, reg)
+	if err != nil {
+		return err
+	}
+	if metricsSrv != nil {
+		defer func() {
+			shCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			_ = metricsSrv.Shutdown(shCtx)
+		}()
+		_, _ = fmt.Fprintf(stderr, "metrics listening on http://%s/metrics\n", metricsSrv.Addr())
 	}
 
 	ctx, stop := delivery.Notify(parent)

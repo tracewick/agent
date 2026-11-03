@@ -13,6 +13,7 @@ import (
 
 	"github.com/tracewick/agent/internal/agent"
 	"github.com/tracewick/agent/internal/config"
+	"github.com/tracewick/agent/internal/metrics"
 )
 
 func TestAgentRunOnceDelivers(t *testing.T) {
@@ -49,7 +50,8 @@ func TestAgentRunOnceDelivers(t *testing.T) {
 		MaxCardinality:       256,
 		Once:                 true,
 	}
-	a, err := agent.New(&cfg, nil, nil)
+	reg := metrics.New()
+	a, err := agent.New(&cfg, nil, nil, reg)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +60,16 @@ func TestAgentRunOnceDelivers(t *testing.T) {
 	}
 	if posts.Load() != 1 {
 		t.Fatalf("posts = %d", posts.Load())
+	}
+	snap := reg.Snapshot()
+	if snap.Claimed != 1 || snap.Delivered != 1 || snap.UploadDurationCount != 1 {
+		t.Fatalf("metrics %#v", snap)
+	}
+	if snap.AggregationRatio != 1 || snap.BatchFiles != 1 {
+		t.Fatalf("batch/ratio %#v", snap)
+	}
+	if a.Metrics() != reg {
+		t.Fatal("Metrics()")
 	}
 }
 
@@ -82,7 +94,7 @@ func TestAgentRunCancels(t *testing.T) {
 		HTTPTimeout:          time.Second,
 		MaxCardinality:       256,
 	}
-	a, err := agent.New(&cfg, nil, nil)
+	a, err := agent.New(&cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +125,7 @@ func TestAgentRunOnceFailsOn5xx(t *testing.T) {
 		AggregationWindowSec: 15, StaleClaim: 10 * time.Minute, OwnershipMargin: time.Minute,
 		MaxFilesPerPass: 8, MaxBatchInputBytes: 8 << 20, HTTPTimeout: time.Second, MaxCardinality: 256, Once: true,
 	}
-	a, err := agent.New(&cfg, nil, nil)
+	a, err := agent.New(&cfg, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +136,7 @@ func TestAgentRunOnceFailsOn5xx(t *testing.T) {
 
 func TestNewNilConfig(t *testing.T) {
 	t.Parallel()
-	if _, err := agent.New(nil, nil, nil); err == nil {
+	if _, err := agent.New(nil, nil, nil, nil); err == nil {
 		t.Fatal("nil config")
 	}
 }

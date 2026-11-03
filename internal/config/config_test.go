@@ -78,7 +78,7 @@ func TestLoadValidation(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "PASSWORD") {
 		t.Fatalf("auth pair: %v", err)
 	}
-	if !strings.Contains(config.Usage(), "TRACEWICK_PYROSCOPE_PASSWORD") {
+	if !strings.Contains(config.Usage(), "TRACEWICK_PYROSCOPE_PASSWORD") || !strings.Contains(config.Usage(), "--metrics-listen") {
 		t.Fatal("usage")
 	}
 	if _, err := config.Load([]string{"--spool-dir"}, empty); err == nil {
@@ -101,12 +101,16 @@ func TestLoadSeparateFlags(t *testing.T) {
 		"--pyroscope-tenant", "t",
 		"--reader-id", "r1",
 		"--sleep", "2s",
+		"--metrics-listen", "127.0.0.1:9090",
 	}, envMap{"TRACEWICK_PYROSCOPE_PASSWORD": "secret"}.get)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.PyroscopeUser != "u" || cfg.PyroscopeTenant != "t" || cfg.ReaderID != "r1" || cfg.Sleep != 2*time.Second {
 		t.Fatalf("%#v", cfg)
+	}
+	if cfg.MetricsListen != "127.0.0.1:9090" {
+		t.Fatalf("metrics listen %#v", cfg)
 	}
 }
 
@@ -119,46 +123,55 @@ func TestLoadEqualsFormsAndErrors(t *testing.T) {
 		"--pyroscope-tenant=ten",
 		"--aggregation-window=12",
 		"--sleep=3s",
+		"--metrics-listen=:0",
 	}, envMap{"TRACEWICK_PYROSCOPE_PASSWORD": "x"}.get)
-	if err != nil || cfg.AggregationWindowSec != 12 || cfg.PyroscopeTenant != "ten" {
+	if err != nil || cfg.AggregationWindowSec != 12 || cfg.PyroscopeTenant != "ten" || cfg.MetricsListen != ":0" {
 		t.Fatalf("%v %#v", err, cfg)
 	}
 	empty := func(string) string { return "" }
-	if _, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", "--aggregation-window=nope"}, empty); err == nil {
-		t.Fatal("bad window")
+	cases := []struct {
+		name string
+		args []string
+		help bool
+	}{
+		{"bad window", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--aggregation-window=nope"}, false},
+		{"bad window sep", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--aggregation-window", "nope"}, false},
+		{"bad sleep", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--sleep=nope"}, false},
+		{"bad sleep sep", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--sleep", "nope"}, false},
+		{"spool missing", []string{"--pyroscope-url", "http://x"}, false},
+		{"url needs value", []string{"--spool-dir=/s", "--pyroscope-url"}, false},
+		{"user needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--pyroscope-user"}, false},
+		{"tenant needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--pyroscope-tenant"}, false},
+		{"reader needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--reader-id"}, false},
+		{"window needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--aggregation-window"}, false},
+		{"sleep needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--sleep"}, false},
+		{"metrics-listen needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--metrics-listen"}, false},
+		{"help", []string{"-h"}, true},
 	}
-	if _, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", "--aggregation-window", "nope"}, empty); err == nil {
-		t.Fatal("bad window sep")
+	for _, tc := range cases {
+		_, loadErr := config.Load(tc.args, empty)
+		if tc.help {
+			if !config.IsHelp(loadErr) {
+				t.Fatalf("%s: %v", tc.name, loadErr)
+			}
+			continue
+		}
+		if loadErr == nil {
+			t.Fatalf("%s: want error", tc.name)
+		}
 	}
-	if _, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", "--sleep=nope"}, empty); err == nil {
-		t.Fatal("bad sleep")
+}
+
+func TestLoadMetricsListenEnv(t *testing.T) {
+	t.Parallel()
+	envListen := envMap{
+		"TRACEWICK_SPOOL_DIR":      "/s",
+		"TRACEWICK_PYROSCOPE_URL":  "http://x",
+		"TRACEWICK_METRICS_LISTEN": "0.0.0.0:9100",
 	}
-	if _, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", "--sleep", "nope"}, empty); err == nil {
-		t.Fatal("bad sleep sep")
-	}
-	if _, err := config.Load([]string{"--pyroscope-url", "http://x"}, empty); err == nil {
-		t.Fatal("spool missing with url flag")
-	}
-	if _, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url"}, empty); err == nil {
-		t.Fatal("url needs value")
-	}
-	if _, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", "--pyroscope-user"}, empty); err == nil {
-		t.Fatal("user needs value")
-	}
-	if _, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", "--pyroscope-tenant"}, empty); err == nil {
-		t.Fatal("tenant needs value")
-	}
-	if _, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", "--reader-id"}, empty); err == nil {
-		t.Fatal("reader needs value")
-	}
-	if _, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", "--aggregation-window"}, empty); err == nil {
-		t.Fatal("window needs value")
-	}
-	if _, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", "--sleep"}, empty); err == nil {
-		t.Fatal("sleep needs value")
-	}
-	if _, err := config.Load([]string{"-h"}, empty); !config.IsHelp(err) {
-		t.Fatal(err)
+	cfgEnv, err := config.Load(nil, envListen.get)
+	if err != nil || cfgEnv.MetricsListen != "0.0.0.0:9100" {
+		t.Fatalf("env listen %v %#v", err, cfgEnv)
 	}
 }
 

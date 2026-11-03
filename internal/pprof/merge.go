@@ -84,15 +84,21 @@ func Merge(profiles []*Profile) (*Profile, error) {
 	return (Merger{}).Merge(profiles)
 }
 
-// FromSpoolFile decodes a SpoolFile compact-stacks payload into a Profile.
+// FromSpoolFile decodes a SpoolFile compact-stacks payload into a Profile
+// using DefaultDecodeLimits.
 func FromSpoolFile(f *spool.File) (*Profile, error) {
+	return FromSpoolFileLimited(f, DefaultDecodeLimits())
+}
+
+// FromSpoolFileLimited decodes with explicit compact-stacks allocation caps.
+func FromSpoolFileLimited(f *spool.File, lim DecodeLimits) (*Profile, error) {
 	if f == nil {
 		return nil, fmt.Errorf("pprof: nil spool file")
 	}
 	if f.Format != spool.FormatCompactStacks {
 		return nil, fmt.Errorf("pprof: unsupported spool format %q", f.Format)
 	}
-	frames, stacks, err := DecodeCompactStacks(f.Payload)
+	frames, stacks, err := DecodeCompactStacksLimited(f.Payload, lim)
 	if err != nil {
 		return nil, err
 	}

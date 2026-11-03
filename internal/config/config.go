@@ -261,7 +261,7 @@ Options:
   --reader-id=ID                claim reader id (default: host-pid)
   --aggregation-window=S        merge window 10–15 seconds (default: 15)
   --sleep=DURATION              idle poll delay (default: 5s)
-  --shutdown-grace=DURATION     finish in-flight work after SIGTERM (default: 30s)
+  --shutdown-grace=DURATION     after SIGTERM stop new claims immediately; finish in-flight for DURATION (0=stop now; default: 30s)
   --max-rejected-files=N        keep up to N files under rejected/ (default: 100; 0 deletes)
   --metrics-listen=ADDR         Prometheus /metrics bind (env TRACEWICK_METRICS_LISTEN; empty disables)
   --tls-ca=PATH                 extra PEM CA roots for HTTPS (env TRACEWICK_TLS_CA)

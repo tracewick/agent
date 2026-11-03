@@ -37,7 +37,7 @@ type BoundedBuilder struct {
 
 type stackEntry struct {
 	ids       []int
-	count     uint32
+	count     uint64 // wider than wire uint32 so Add cannot wrap silently
 	truncated bool
 }
 
@@ -119,7 +119,7 @@ func (b *BoundedBuilder) Add(frames []Frame, weight uint32, truncated bool) {
 		stackKey += ",truncated"
 	}
 	if e, ok := b.stacks[stackKey]; ok {
-		e.count += weight
+		e.count += uint64(weight)
 		b.stacks[stackKey] = e
 		b.keptWeight += uint64(weight)
 		return
@@ -138,7 +138,7 @@ func (b *BoundedBuilder) Add(frames []Frame, weight uint32, truncated bool) {
 	for s := range pendingStrings {
 		b.strings[s] = struct{}{}
 	}
-	b.stacks[stackKey] = stackEntry{ids: ids, count: weight, truncated: truncated}
+	b.stacks[stackKey] = stackEntry{ids: ids, count: uint64(weight), truncated: truncated}
 	b.stackOrder = append(b.stackOrder, stackKey)
 	b.keptWeight += uint64(weight)
 }
@@ -148,7 +148,7 @@ func (b *BoundedBuilder) Parts() (frames []Frame, stacks []Stack) {
 	frames = append([]Frame(nil), b.frames...)
 	for _, key := range b.stackOrder {
 		e := b.stacks[key]
-		stacks = append(stacks, Stack{FrameIDs: append([]int(nil), e.ids...), Count: e.count, Truncated: e.truncated})
+		stacks = append(stacks, Stack{FrameIDs: append([]int(nil), e.ids...), Count: u32sat(e.count), Truncated: e.truncated})
 	}
 	if b.overflowWeight > 0 {
 		overflowID := len(frames)

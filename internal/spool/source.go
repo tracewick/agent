@@ -91,6 +91,8 @@ func NewSource(cfg Config) (*Source, error) {
 }
 
 // Claim takes the next available spool file, oldest name first.
+// A non-nil error means the spool directory itself is unusable (missing, EACCES, …),
+// not “empty queue”.
 func (s *Source) Claim() (*Claimed, error) {
 	scanned := false
 	for {
@@ -98,7 +100,11 @@ func (s *Source) Claim() (*Claimed, error) {
 			if scanned {
 				return nil, nil
 			}
-			s.queue = s.scan()
+			q, err := s.scan()
+			if err != nil {
+				return nil, err
+			}
+			s.queue = q
 			scanned = true
 		}
 		for len(s.queue) > 0 {
@@ -140,17 +146,23 @@ func (s *Source) Reject(c *Claimed) error {
 	return nil
 }
 
-func (s *Source) scan() []string {
+func (s *Source) scan() ([]string, error) {
 	var files []string
-	s.scanDirectory(s.cfg.Directory, "", &files)
+	if err := s.scanDirectory(s.cfg.Directory, "", &files); err != nil {
+		return nil, err
+	}
 	sort.Strings(files)
-	return files
+	return files, nil
 }
 
-func (s *Source) scanDirectory(directory, prefix string, files *[]string) {
+func (s *Source) scanDirectory(directory, prefix string, files *[]string) error {
 	entries, err := osReadDir(directory)
 	if err != nil {
-		return
+		// Root spool dir must be readable; nested shard races are ignored.
+		if prefix == "" {
+			return err
+		}
+		return nil
 	}
 	for _, entry := range entries {
 		name := entry.Name()
@@ -165,7 +177,9 @@ func (s *Source) scanDirectory(directory, prefix string, files *[]string) {
 				continue
 			}
 			if shardNameRE.MatchString(name) {
-				s.scanDirectory(path, relative, files)
+				if err := s.scanDirectory(path, relative, files); err != nil {
+					return err
+				}
 			}
 			continue
 		}
@@ -187,6 +201,7 @@ func (s *Source) scanDirectory(directory, prefix string, files *[]string) {
 			}
 		}
 	}
+	return nil
 }
 
 func (s *Source) tryClaim(name string) *Claimed {

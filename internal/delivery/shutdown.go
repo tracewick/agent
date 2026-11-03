@@ -20,26 +20,45 @@ func Notify(parent context.Context, signals ...os.Signal) (context.Context, cont
 	return signal.NotifyContext(parent, signals...)
 }
 
-// WithGrace returns a child context that is cancelled either when parent is cancelled
-// or when grace elapses after parent cancellation starts being observed.
-// Callers typically: ctx, stop := Notify(...); defer stop(); workCtx, cancel := WithGrace(ctx, grace); defer cancel().
-func WithGrace(parent context.Context, grace time.Duration) (context.Context, context.CancelFunc) {
-	if grace <= 0 {
+// SplitAdmitGrace returns two child contexts for shutdown:
+//   - admit is cancelled as soon as parent is cancelled (stop new claims);
+//   - work is cancelled after grace (finish in-flight push), or immediately when grace is 0.
+//
+// grace < 0 uses DefaultShutdownGrace. grace == 0 cancels work immediately with admit.
+func SplitAdmitGrace(parent context.Context, grace time.Duration) (admit, work context.Context, cancel context.CancelFunc) {
+	if grace < 0 {
 		grace = DefaultShutdownGrace
 	}
-	ctx, cancel := context.WithCancel(context.WithoutCancel(parent))
+	admit, cancelAdmit := context.WithCancel(context.WithoutCancel(parent))
+	work, cancelWork := context.WithCancel(context.WithoutCancel(parent))
 	go func() {
 		select {
 		case <-parent.Done():
+			cancelAdmit()
+			if grace == 0 {
+				cancelWork()
+				return
+			}
 			timer := time.NewTimer(grace)
 			defer timer.Stop()
 			select {
 			case <-timer.C:
-				cancel()
-			case <-ctx.Done():
+				cancelWork()
+			case <-work.Done():
 			}
-		case <-ctx.Done():
+		case <-admit.Done():
 		}
 	}()
-	return ctx, cancel
+	return admit, work, func() {
+		cancelAdmit()
+		cancelWork()
+	}
+}
+
+// WithGrace returns a child cancelled grace after parent cancellation.
+// Deprecated for agent shutdown: prefer SplitAdmitGrace so new claims stop immediately.
+// grace < 0 → DefaultShutdownGrace; grace == 0 → cancel immediately when parent is done.
+func WithGrace(parent context.Context, grace time.Duration) (context.Context, context.CancelFunc) {
+	_, work, cancel := SplitAdmitGrace(parent, grace)
+	return work, cancel
 }

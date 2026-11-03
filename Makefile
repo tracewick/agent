@@ -100,8 +100,9 @@ pprof-check: ## Validate testdata/pprof/*.pb with go tool pprof (library CI pari
 		$(GO) tool pprof -raw "$$f" >/dev/null; \
 	done
 
-fuzz-smoke: ## Short SpoolFile fuzz run for CI
+fuzz-smoke: ## Short SpoolFile + compact-stacks fuzz for CI
 	$(GO) test ./internal/spool/ -fuzz=FuzzParse -fuzztime=15s
+	$(GO) test ./internal/pprof/ -fuzz=FuzzDecodeCompactStacks -fuzztime=15s
 
 mutation: ## Gremlins MSI gate on core packages (.gremlins.yaml thresholds)
 	@command -v $(GREMLINS) >/dev/null || $(GO) install github.com/go-gremlins/gremlins/cmd/gremlins@$(GREMLINS_VERSION)

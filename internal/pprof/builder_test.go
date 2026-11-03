@@ -98,6 +98,27 @@ func TestBoundedBuilderValidationAndEmpty(t *testing.T) {
 	}
 }
 
+func TestBoundedBuilderWeightOverflowSaturates(t *testing.T) {
+	t.Parallel()
+	b, err := pprof.NewBoundedBuilder(10, 10, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	frames := []pprof.Frame{fr(str("hot"), nil, nil, 0, nil)}
+	b.Add(frames, ^uint32(0), false)
+	b.Add(frames, 2, false)
+	if b.KeptWeight() != uint64(^uint32(0))+2 {
+		t.Fatalf("keptWeight = %d", b.KeptWeight())
+	}
+	_, stacks := b.Parts()
+	if len(stacks) != 1 {
+		t.Fatalf("stacks = %d", len(stacks))
+	}
+	if stacks[0].Count != ^uint32(0) {
+		t.Fatalf("wire count must saturate at MaxUint32, got %d", stacks[0].Count)
+	}
+}
+
 func TestBoundedBuilderReusesPendingAndStrings(t *testing.T) {
 	t.Parallel()
 	b, err := pprof.NewBoundedBuilder(10, 10, 10)

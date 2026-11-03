@@ -63,5 +63,12 @@ func NewHTTPClient(timeout time.Duration, opts TLSOptions) (*http.Client, error)
 		ExpectContinueTimeout: time.Second,
 		TLSClientConfig:       tlsCfg,
 	}
-	return &http.Client{Timeout: timeout, Transport: transport}, nil
+	return &http.Client{
+		Timeout:   timeout,
+		Transport: transport,
+		// Never follow redirects: a 302→200 HTML login page must not become a false ACK.
+		CheckRedirect: func(*http.Request, []*http.Request) error {
+			return http.ErrUseLastResponse
+		},
+	}, nil
 }

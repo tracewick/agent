@@ -7,22 +7,27 @@ import (
 
 // Backlog is a point-in-time view of unclaimed *.spool files (not claimed/rejected).
 type Backlog struct {
-	Files     int
-	Bytes     int64
-	OldestAge time.Duration // zero when Files == 0
+	Files      int
+	Bytes      int64
+	OldestAge  time.Duration // zero when Files == 0
+	Unreadable bool          // root spool directory could not be listed (EACCES / missing)
 }
 
 // Backlog scans the spool directory for deliverable files without claiming them.
 // Age uses file ModTime relative to Now (legacy-friendly; claim epoch applies only after claim).
+// When the root directory is unreadable, Unreadable is set and counts stay zero (not "empty").
 func (s *Source) Backlog() Backlog {
 	now := s.cfg.Now()
 	var out Backlog
 	var oldestMod time.Time
-	var walk func(directory, prefix string)
-	walk = func(directory, prefix string) {
+	var walk func(directory, prefix string) bool
+	walk = func(directory, prefix string) bool {
 		entries, err := osReadDir(directory)
 		if err != nil {
-			return
+			if prefix == "" {
+				out.Unreadable = true
+			}
+			return false
 		}
 		for _, entry := range entries {
 			name := entry.Name()
@@ -54,8 +59,12 @@ func (s *Source) Backlog() Backlog {
 				oldestMod = mod
 			}
 		}
+		return true
 	}
 	walk(s.cfg.Directory, "")
+	if out.Unreadable {
+		return out
+	}
 	if out.Files > 0 && !oldestMod.IsZero() {
 		age := now.Sub(oldestMod)
 		if age > 0 {

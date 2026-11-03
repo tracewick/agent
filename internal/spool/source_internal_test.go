@@ -122,8 +122,13 @@ func TestScanReadDirFailureAndDefaults(t *testing.T) {
 	}
 
 	osReadDir = func(string) ([]os.DirEntry, error) { return nil, errors.New("readdir boom") }
-	if files := src.scan(); len(files) != 0 {
-		t.Fatalf("scan on readdir fail: %v", files)
+	files, scanErr := src.scan()
+	if scanErr == nil || len(files) != 0 {
+		t.Fatalf("scan on readdir fail: files=%v err=%v", files, scanErr)
+	}
+	claimed, claimErr := src.Claim()
+	if claimErr == nil || claimed != nil {
+		t.Fatalf("claim on unreadable dir: claimed=%v err=%v", claimed, claimErr)
 	}
 
 	osStat = func(string) (os.FileInfo, error) { return nil, errors.New("stat boom") }

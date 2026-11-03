@@ -14,6 +14,8 @@ type Member struct {
 	File *spool.File
 	// Name is the relative spool path; optional. When set, a filename aggregation-key
 	// hint is parsed and must match the header hash or GroupBy fails (header re-check).
+	// Prefer isolating mismatches in the caller (Drain) before GroupBy so one bad name
+	// cannot fail an entire batch.
 	Name string
 	// HintHash overrides filename parsing when non-empty (tests / callers that already parsed the name).
 	HintHash string

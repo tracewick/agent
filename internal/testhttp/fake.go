@@ -22,7 +22,7 @@ type Action struct {
 	Raw []byte
 	// Stall waits this long after reading the request (and before writing, if any).
 	Stall time.Duration
-	// CloseIfTrue closes the connection immediately without reading (PHP {"close": true}).
+	// Close closes the connection immediately without reading (PHP {"close": true}).
 	Close bool
 	// HangUpAfterStall closes without writing a response after Stall (PHP stall without status).
 	HangUpAfterStall bool

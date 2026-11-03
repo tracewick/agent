@@ -26,6 +26,9 @@ func TestLoadRequiredAndDefaults(t *testing.T) {
 	if cfg.ReaderID != "agent-1" || cfg.AggregationWindowSec != 15 {
 		t.Fatalf("%#v", cfg)
 	}
+	if cfg.MaxRejectedFiles != 100 || cfg.ShutdownGrace != 30*time.Second {
+		t.Fatalf("reject/grace defaults %#v", cfg)
+	}
 }
 
 func TestLoadFlagsOverrideEnv(t *testing.T) {
@@ -116,7 +119,9 @@ func TestLoadValidation(t *testing.T) {
 	usage := config.Usage()
 	if !strings.Contains(usage, "TRACEWICK_PYROSCOPE_PASSWORD") ||
 		!strings.Contains(usage, "--metrics-listen") ||
-		!strings.Contains(usage, "--tls-ca") {
+		!strings.Contains(usage, "--tls-ca") ||
+		!strings.Contains(usage, "--shutdown-grace") ||
+		!strings.Contains(usage, "--max-rejected-files") {
 		t.Fatal("usage")
 	}
 	if _, err := config.Load([]string{"--spool-dir"}, empty); err == nil {
@@ -185,6 +190,10 @@ func TestLoadEqualsFormsAndErrors(t *testing.T) {
 		{"sleep needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--sleep"}, false},
 		{"metrics-listen needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--metrics-listen"}, false},
 		{"tls-ca needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--tls-ca"}, false},
+		{"bad grace", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--shutdown-grace=nope"}, false},
+		{"bad max-rejected", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--max-rejected-files=nope"}, false},
+		{"grace needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--shutdown-grace"}, false},
+		{"max-rejected needs value", []string{"--spool-dir=/s", "--pyroscope-url=http://x", "--max-rejected-files"}, false},
 		{"help", []string{"-h"}, true},
 	}
 	for _, tc := range cases {
@@ -211,6 +220,42 @@ func TestLoadMetricsListenEnv(t *testing.T) {
 	cfgEnv, err := config.Load(nil, envListen.get)
 	if err != nil || cfgEnv.MetricsListen != "0.0.0.0:9100" {
 		t.Fatalf("env listen %v %#v", err, cfgEnv)
+	}
+}
+
+func TestLoadShutdownGraceAndMaxRejected(t *testing.T) {
+	t.Parallel()
+	empty := func(string) string { return "" }
+	cfg, err := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x",
+		"--shutdown-grace=250ms", "--max-rejected-files=7",
+	}, empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ShutdownGrace != 250*time.Millisecond || cfg.MaxRejectedFiles != 7 {
+		t.Fatalf("%#v", cfg)
+	}
+	cfg2, err := config.Load([]string{
+		"--spool-dir", "/s", "--pyroscope-url", "http://x",
+		"--shutdown-grace", "1s", "--max-rejected-files", "0",
+	}, empty)
+	if err != nil || cfg2.ShutdownGrace != time.Second || cfg2.MaxRejectedFiles != 0 {
+		t.Fatalf("%v %#v", err, cfg2)
+	}
+	defaults, err := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x"}, empty)
+	if err != nil || defaults.MaxRejectedFiles != 100 || defaults.ShutdownGrace != 30*time.Second {
+		t.Fatalf("defaults %#v", defaults)
+	}
+	if _, err := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x", "--max-rejected-files=-1",
+	}, empty); err == nil {
+		t.Fatal("want max-rejected bounds error")
+	}
+	if _, err := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x", "--shutdown-grace=-1s",
+	}, empty); err == nil {
+		t.Fatal("want grace bounds error")
 	}
 }
 

@@ -72,11 +72,11 @@ php-drain: ## Install Packagist tracewick/tracewick for Go+PHP-drain e2e
 	cd $(PHP_DRAIN_DIR) && composer update --no-interaction --no-progress --prefer-dist --no-dev
 	@test -x $(PHP_DRAIN_BIN) || test -f $(PHP_DRAIN_BIN)
 
-e2e: ## Cross-process E2E (build tag e2e; not part of make ci)
+e2e: ## Cross-process E2E (build tag e2e; not part of make ci; -v for useful progress)
 	@if [ -f "$(PHP_DRAIN_BIN)" ]; then \
-		TRACEWICK_DRAIN_BIN="$(PHP_DRAIN_BIN)" $(GO) test -tags=e2e -count=1 -timeout=5m ./test/e2e/; \
+		TRACEWICK_DRAIN_BIN="$(PHP_DRAIN_BIN)" $(GO) test -tags=e2e -count=1 -timeout=5m -v ./test/e2e/; \
 	else \
-		$(GO) test -tags=e2e -count=1 -timeout=5m ./test/e2e/; \
+		$(GO) test -tags=e2e -count=1 -timeout=5m -v ./test/e2e/; \
 	fi
 
 stand-up: ## Start Pyroscope + Toxiproxy (127.0.0.1)

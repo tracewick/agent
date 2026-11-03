@@ -32,6 +32,7 @@ func TestGoAndPHPDrainOneSpool(t *testing.T) {
 	spoolDir := filepath.Join(t.TempDir(), "spool")
 	const files = 24
 	seedSpool(t, spoolDir, fixtureBytes(t, "web-request.spool"), files)
+	logf(t, "go+php: drain=%s spool=%s files=%d", drainBin, spoolDir, files)
 
 	var posts atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,13 +94,15 @@ func TestGoAndPHPDrainOneSpool(t *testing.T) {
 		if res.err != nil {
 			t.Fatalf("%s: %v\nstderr:\n%s", res.name, res.err, res.stderr)
 		}
-		t.Logf("%s ok; stderr snippet: %q", res.name, trimLog(res.stderr, 200))
+		logf(t, "%s ok; %s", res.name, trimLog(res.stderr, 200))
 	}
 
+	logSpool(t, spoolDir, "after go+php")
 	if left := listSpoolLeftovers(t, spoolDir); len(left) != 0 {
 		t.Fatalf("spool leftovers after Go+PHP drain: %v", left)
 	}
 	got := posts.Load()
+	logf(t, "go+php: pyroscope POSTs=%d (want 1 or 2)", got)
 	if got < 1 || got > 2 {
 		t.Fatalf("pyroscope posts = %d; want 1 or 2", got)
 	}

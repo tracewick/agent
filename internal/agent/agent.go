@@ -49,10 +49,11 @@ func New(cfg *config.Config, log *slog.Logger, httpClient *http.Client, registry
 		return nil, vErr
 	}
 	src, err := spool.NewSource(spool.Config{
-		Directory:    cfg.SpoolDir,
-		ReaderID:     cfg.ReaderID,
-		MaxFileBytes: limits.MaxDecodedBytes,
-		StaleClaim:   cfg.StaleClaim,
+		Directory:        cfg.SpoolDir,
+		ReaderID:         cfg.ReaderID,
+		MaxFileBytes:     limits.MaxDecodedBytes,
+		StaleClaim:       cfg.StaleClaim,
+		MaxRejectedFiles: cfg.MaxRejectedFiles,
 	})
 	if err != nil {
 		return nil, err
@@ -133,9 +134,9 @@ func (a *Agent) Run(ctx context.Context) error {
 		case OutcomeFailed:
 			a.log.Warn("drain pass failed", "delivered", res.Delivered, "rejected", res.Rejected, "err", res.Failure)
 		case OutcomeMore:
-			a.log.Debug("more spool work remains", "delivered", res.Delivered, "rejected", res.Rejected)
+			a.logDrainPass(res, "more")
 		case OutcomeEmpty:
-			a.log.Debug("spool idle", "delivered", res.Delivered, "rejected", res.Rejected)
+			a.logDrainPass(res, "empty")
 		}
 
 		if a.cfg.Once {
@@ -159,6 +160,16 @@ func (a *Agent) Run(ctx context.Context) error {
 			return err
 		}
 	}
+}
+
+func (a *Agent) logDrainPass(res Result, outcome string) {
+	// Idle empty polls stay Debug; any delivered/rejected work is Info so operators
+	// (and e2e -v) see progress without drowning in sleep ticks.
+	if res.Delivered == 0 && res.Rejected == 0 {
+		a.log.Debug("spool idle", "outcome", outcome, "delivered", res.Delivered, "rejected", res.Rejected)
+		return
+	}
+	a.log.Info("drain pass", "outcome", outcome, "delivered", res.Delivered, "rejected", res.Rejected)
 }
 
 func (a *Agent) refreshSpoolBacklog() {

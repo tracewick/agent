@@ -15,13 +15,16 @@ func TestStandPyroscopeReady(t *testing.T) {
 	if !ok {
 		t.Skipf("stand env unset (%s, %s, %s); run make stand-up", envPyroscopeURL, envPyroscopeToxicURL, envToxiproxyURL)
 	}
+	logf(t, "stand ready check pyroscope=%s toxic=%s toxiAPI=%s", pyroscope, toxic, toxiAPI)
 	for _, u := range []string{pyroscope + "/ready", toxic + "/ready"} {
 		assertReady(t, u)
+		logf(t, "GET %s OK", u)
 	}
 	tx := newToxiproxy(toxiAPI)
 	if err := tx.reset(); err != nil {
 		t.Fatal(err)
 	}
+	logf(t, "toxiproxy reset OK")
 }
 
 func assertReady(t *testing.T, url string) {

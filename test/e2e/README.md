@@ -37,15 +37,12 @@ cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick
 
 ## Status
 
-- Done: two Go agents (httptest); stand compose + smoke;
-  Toxiproxy suite (healthy / latency / timeout / reset_peer / limit_data) +
-  process kill -9 → stale reclaim (`TestStandToxicChaosSuite`,
-  `TestProcessKillLeavesClaimThenStaleReclaim`);
-  live Querier LabelValues (`TestLivePyroscopeRoundTrip`);
-  Go + PHP `tracewick-drain` claim coexistence (`TestGoAndPHPDrainOneSpool`, needs
-  `TRACEWICK_DRAIN_BIN` / `make php-drain` / sibling `../tracewick`).
-- Next: mutation gate; UID-mismatch chaos (deploy/root). FakeHttp-class client faults
-  live under `internal/testhttp` + `internal/pyroscope` (unit, not e2e).
+- Done: two Go agents; Toxiproxy chaos + kill/stale reclaim; Go + PHP drain;
+  live Querier at check-profiles depth (`LabelValues`, `ProfileTypes`
+  wall:nanoseconds, `SelectMergeStacktraces` + fixture frames, no raw URLs);
+  401 pause keeps spool; fixture reject+deliver; long-run SIGTERM after drain.
+  `make e2e` uses `-v` so lines prefixed `e2e:` show progress in CI.
+- Next: UID-mismatch chaos (deploy/root); benchmarks soak.
 
 ## PHP drain for local E2E
 

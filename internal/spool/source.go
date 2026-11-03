@@ -16,9 +16,11 @@ import (
 
 const (
 	RejectedDirectory = "rejected"
-	claimMarker       = ".claimed-"
-	spoolSuffix       = ".spool"
-	temporarySuffix   = ".tmp"
+	// DefaultMaxRejectedFiles matches PHP SpoolReaderConfig::DEFAULT_MAX_REJECTED_FILES.
+	DefaultMaxRejectedFiles = 100
+	claimMarker             = ".claimed-"
+	spoolSuffix             = ".spool"
+	temporarySuffix         = ".tmp"
 )
 
 var (

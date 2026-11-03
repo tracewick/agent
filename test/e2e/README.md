@@ -45,7 +45,7 @@ cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick
   Go + PHP `tracewick-drain` claim coexistence (`TestGoAndPHPDrainOneSpool`, needs
   `TRACEWICK_DRAIN_BIN` / `make php-drain` / sibling `../tracewick`).
 - Next: UID-mismatch chaos (deploy/root); benchmarks soak. Mutation MSI gate is
-  `make mutation` / `mutation.yml` (not e2e). FakeHttp-class faults live under
+  `make mutation` (Checks step, not e2e). FakeHttp-class faults live under
   `internal/testhttp` + `internal/pyroscope` (unit).
 
 ## PHP drain for local E2E

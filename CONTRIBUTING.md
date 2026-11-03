@@ -38,7 +38,7 @@ make test-race
 make lint
 make build
 make e2e         # cross-process E2E (separate from make ci; CI workflow e2e.yml)
-make mutation    # Gremlins MSI gate on core packages (CI workflow mutation.yml)
+make mutation    # Gremlins MSI gate on core packages (also a Checks step, like Infection)
 ```
 
 Before every push, run what CI would catch on your change. Prefer `make ci`.

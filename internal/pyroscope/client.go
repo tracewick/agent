@@ -66,7 +66,13 @@ func NewClient(cfg *Config) (*Client, error) {
 	endpoint := strings.TrimRight(cfg.ServerURL, "/") + Path
 	httpClient := cfg.HTTPClient
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: defaultTimeout}
+		httpClient = &http.Client{
+			Timeout: defaultTimeout,
+			// Match httputil.NewHTTPClient: never follow redirects into a false 2xx ACK.
+			CheckRedirect: func(*http.Request, []*http.Request) error {
+				return http.ErrUseLastResponse
+			},
+		}
 	}
 	newID := cfg.NewSampleID
 	if newID == nil {

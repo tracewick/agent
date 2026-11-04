@@ -104,27 +104,34 @@ func New(cfg *config.Config, log *slog.Logger, httpClient *http.Client, registry
 // Metrics returns the registry passed to New (may be nil).
 func (a *Agent) Metrics() *metrics.Registry { return a.metrics }
 
-// Run polls until ctx is cancelled, or finishes one productive cycle when cfg.Once.
-func (a *Agent) Run(ctx context.Context) error {
+// Run polls until admitCtx is cancelled, or finishes one productive cycle when cfg.Once.
+// admitCtx stops new claims immediately on SIGTERM; pushCtx may outlive admit for grace.
+// When pushCtx is nil it defaults to admitCtx.
+func (a *Agent) Run(admitCtx, pushCtx context.Context) error {
+	if pushCtx == nil {
+		pushCtx = admitCtx
+	}
 	var pauseUntil time.Time
+	failStreak := 0
 	for {
-		if err := ctx.Err(); err != nil {
+		if err := admitCtx.Err(); err != nil {
 			return err
 		}
 		now := a.now()
 		if !pauseUntil.IsZero() && now.Before(pauseUntil) {
 			wait := pauseUntil.Sub(now)
 			a.log.Info("delivery paused", "until", pauseUntil, "wait", wait)
-			if err := a.sleep(ctx, wait); err != nil {
+			if err := a.sleep(admitCtx, wait); err != nil {
 				return err
 			}
 			continue
 		}
 
 		a.refreshSpoolBacklog()
-		res := a.drainer.Drain(ctx)
+		res := a.drainer.Drain(admitCtx, pushCtx)
 		switch res.Outcome {
 		case OutcomePaused:
+			failStreak = 0
 			pauseUntil = a.now().Add(res.PauseFor)
 			a.log.Error("drain paused", "reason", res.Failure, "for", res.PauseFor)
 			if a.cfg.Once {
@@ -132,10 +139,17 @@ func (a *Agent) Run(ctx context.Context) error {
 			}
 			continue // next iter sleeps until pauseUntil
 		case OutcomeFailed:
+			failStreak++
 			a.log.Warn("drain pass failed", "delivered", res.Delivered, "rejected", res.Rejected, "err", res.Failure)
 		case OutcomeMore:
+			if res.Delivered > 0 {
+				failStreak = 0
+			}
 			a.logDrainPass(res, "more")
 		case OutcomeEmpty:
+			if res.Delivered > 0 {
+				failStreak = 0
+			}
 			a.logDrainPass(res, "empty")
 		}
 
@@ -153,10 +167,11 @@ func (a *Agent) Run(ctx context.Context) error {
 			continue // tight loop while backlog exists
 		}
 		backoff := a.cfg.Sleep
-		if res.Outcome == OutcomeFailed && backoff < time.Second {
-			backoff = time.Second
+		if res.Outcome == OutcomeFailed {
+			// failStreak was just incremented; attempt is 0-based.
+			backoff = delivery.Backoff(failStreak-1, res.RetryAfter, time.Second, 5*time.Minute, nil)
 		}
-		if err := a.sleep(ctx, backoff); err != nil {
+		if err := a.sleep(admitCtx, backoff); err != nil {
 			return err
 		}
 	}
@@ -177,6 +192,10 @@ func (a *Agent) refreshSpoolBacklog() {
 		return
 	}
 	b := a.drainer.Source.Backlog()
+	if b.Unreadable {
+		a.log.Error("spool directory unreadable; backlog metrics not updated")
+		return
+	}
 	a.metrics.SetSpoolBacklog(b.Files, b.Bytes, b.OldestAge)
 }
 

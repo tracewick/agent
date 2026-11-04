@@ -55,7 +55,7 @@ func TestAgentRunOnceDelivers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Run(context.Background()); err != nil {
+	if err := a.Run(context.Background(), context.Background()); err != nil {
 		t.Fatal(err)
 	}
 	if posts.Load() != 1 {
@@ -100,7 +100,7 @@ func TestAgentRunCancels(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 80*time.Millisecond)
 	defer cancel()
-	err = a.Run(ctx)
+	err = a.Run(ctx, ctx)
 	if err == nil {
 		t.Fatal("expected cancel")
 	}
@@ -129,7 +129,7 @@ func TestAgentRunOnceFailsOn5xx(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Run(context.Background()); err == nil {
+	if err := a.Run(context.Background(), context.Background()); err == nil {
 		t.Fatal("expected failure")
 	}
 }

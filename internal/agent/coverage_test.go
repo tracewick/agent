@@ -38,7 +38,7 @@ func TestMaxInt64AndDefaults(t *testing.T) {
 	d.Limits = delivery.DefaultLimits()
 	client, _ := pyroscope.NewClient(&pyroscope.Config{ServerURL: "http://127.0.0.1:1"})
 	d.Client = client
-	res := d.Drain(context.Background())
+	res := d.Drain(context.Background(), context.Background())
 	if res.Outcome != OutcomeEmpty {
 		t.Fatalf("%#v", res)
 	}
@@ -66,7 +66,7 @@ func TestDrainer413ShrinkMulti(t *testing.T) {
 	t.Cleanup(srv.Close)
 	d := testDrainer(t, dir, srv.URL, nil)
 	before := d.MaxBatchInputBytes
-	res := d.Drain(context.Background())
+	res := d.Drain(context.Background(), context.Background())
 	if res.Outcome != OutcomeFailed || d.MaxBatchInputBytes >= before {
 		t.Fatalf("%#v bytes=%d", res, d.MaxBatchInputBytes)
 	}
@@ -107,7 +107,7 @@ func TestDrainerOwnershipExhausted(t *testing.T) {
 		Source: src, Client: client, Window: window, Ownership: own, Limits: delivery.DefaultLimits(),
 		MaxFiles: 8, MaxBatchInputBytes: 8 << 20, HTTPTimeout: time.Second, Now: nowFn,
 	}
-	res := d.Drain(context.Background())
+	res := d.Drain(context.Background(), context.Background())
 	if res.Delivered != 0 || res.Outcome != OutcomeFailed {
 		t.Fatalf("%#v", res)
 	}
@@ -136,7 +136,7 @@ func TestAgentPauseOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Run(context.Background()); err == nil {
+	if err := a.Run(context.Background(), context.Background()); err == nil {
 		t.Fatal("expected pause failure on --once")
 	}
 }
@@ -166,7 +166,7 @@ func TestClaimBudgetHitsMore(t *testing.T) {
 	t.Cleanup(srv.Close)
 	d := testDrainer(t, dir, srv.URL, nil)
 	d.MaxFiles = 1
-	res := d.Drain(context.Background())
+	res := d.Drain(context.Background(), context.Background())
 	if res.Outcome != OutcomeMore || res.Delivered != 1 {
 		t.Fatalf("%#v", res)
 	}
@@ -240,7 +240,7 @@ func TestDrainerOwnershipBeforeParse(t *testing.T) {
 		Source: src, Client: client, Window: window, Ownership: own, Limits: delivery.DefaultLimits(),
 		MaxFiles: 1, MaxBatchInputBytes: 8 << 20, HTTPTimeout: time.Second, Now: nowFn,
 	}
-	res := d.Drain(context.Background())
+	res := d.Drain(context.Background(), context.Background())
 	// MaxFiles hit with nothing parseable → OutcomeMore (backlog may remain).
 	if res.Delivered != 0 || res.Outcome != OutcomeMore {
 		t.Fatalf("%#v calls=%d", res, calls)
@@ -260,7 +260,7 @@ func TestDrainerRejectOversizedAndByteBudget(t *testing.T) {
 
 	d := testDrainer(t, dir, srv.URL, nil)
 	d.Limits.MaxDecodedBytes = 100 // below fixture size → reject before parse
-	res := d.Drain(context.Background())
+	res := d.Drain(context.Background(), context.Background())
 	if res.Rejected < 1 {
 		t.Fatalf("oversized: %#v", res)
 	}
@@ -270,7 +270,7 @@ func TestDrainerRejectOversizedAndByteBudget(t *testing.T) {
 	writeSpool(t, dir2, "00000000000000000002-aaaaaaaaaaaaaaaa.spool", "web-request.spool")
 	d2 := testDrainer(t, dir2, srv.URL, nil)
 	d2.MaxBatchInputBytes = 1200 // first file ~1114 fits; second trips byte budget
-	res = d2.Drain(context.Background())
+	res = d2.Drain(context.Background(), context.Background())
 	if res.Outcome != OutcomeMore || res.Delivered != 1 {
 		t.Fatalf("byte budget: %#v", res)
 	}
@@ -285,7 +285,7 @@ func TestDrainerRejectHTTP400AndPprofCaps(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	d := testDrainer(t, dir, srv.URL, nil)
-	res := d.Drain(context.Background())
+	res := d.Drain(context.Background(), context.Background())
 	if res.Rejected != 1 || res.Outcome != OutcomeEmpty {
 		t.Fatalf("400: %#v", res)
 	}
@@ -294,7 +294,7 @@ func TestDrainerRejectHTTP400AndPprofCaps(t *testing.T) {
 	writeSpool(t, dir2, "00000000000000000001-aaaaaaaaaaaaaaaa.spool", "edge-cases.spool")
 	d2 := testDrainer(t, dir2, srv.URL, nil)
 	d2.Limits.MaxStacks = 100_001 // Merger / NewBoundedBuilder rejects
-	res = d2.Drain(context.Background())
+	res = d2.Drain(context.Background(), context.Background())
 	if res.Rejected != 1 {
 		t.Fatalf("merge cap: %#v", res)
 	}
@@ -308,7 +308,7 @@ func TestDrainerRejectHTTP400AndPprofCaps(t *testing.T) {
 	t.Cleanup(okSrv.Close)
 	d3 := testDrainer(t, dir3, okSrv.URL, nil)
 	d3.Limits.MaxAggregatedPprofBytes = 1
-	res = d3.Drain(context.Background())
+	res = d3.Drain(context.Background(), context.Background())
 	if res.Rejected != 1 {
 		t.Fatalf("agg bytes: %#v", res)
 	}
@@ -320,7 +320,7 @@ func TestDrainerNilWindowAndHelpers(t *testing.T) {
 	writeSpool(t, dir, "00000000000000000001-aaaaaaaaaaaaaaaa.spool", "web-request.spool")
 	d := testDrainer(t, dir, "http://127.0.0.1:1", nil)
 	d.Window = nil
-	res := d.Drain(context.Background())
+	res := d.Drain(context.Background(), context.Background())
 	if res.Outcome != OutcomeFailed {
 		t.Fatalf("%#v", res)
 	}
@@ -354,7 +354,7 @@ func TestDrainerAckReleaseFailures(t *testing.T) {
 		srv.Close()
 	})
 	d := testDrainer(t, dir, srv.URL, nil)
-	res := d.Drain(context.Background())
+	res := d.Drain(context.Background(), context.Background())
 	_ = os.Chmod(dir, 0o700) //nolint:gosec // restore
 	if res.Delivered != 1 {
 		t.Fatalf("%#v", res)
@@ -371,7 +371,7 @@ func TestDrainerAckReleaseFailures(t *testing.T) {
 		failSrv.Close()
 	})
 	d2 := testDrainer(t, dir2, failSrv.URL, nil)
-	res = d2.Drain(context.Background())
+	res = d2.Drain(context.Background(), context.Background())
 	_ = os.Chmod(dir2, 0o700) //nolint:gosec // restore
 	if res.Outcome != OutcomeFailed {
 		t.Fatalf("%#v", res)
@@ -386,7 +386,7 @@ func TestDrainerAckReleaseFailures(t *testing.T) {
 	t.Cleanup(ok.Close)
 	d3 := testDrainer(t, dir3, ok.URL, nil)
 	d3.MaxBatchInputBytes = 1 // first file still claimed; then nbytes >= maxBytes
-	res = d3.Drain(context.Background())
+	res = d3.Drain(context.Background(), context.Background())
 	if res.Outcome != OutcomeMore || res.Delivered != 1 {
 		t.Fatalf("single-file byte cap: %#v", res)
 	}
@@ -465,7 +465,7 @@ func TestAgentRunPauseBackoffAndMore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if runErr := a.Run(context.Background()); runErr != nil {
+	if runErr := a.Run(context.Background(), context.Background()); runErr != nil {
 		t.Fatal(runErr)
 	}
 	if posts != 2 {
@@ -491,7 +491,7 @@ func TestAgentRunPauseBackoffAndMore(t *testing.T) {
 		slept = true
 		return context.Canceled
 	}
-	if runErr := a2.Run(context.Background()); runErr == nil {
+	if runErr := a2.Run(context.Background(), context.Background()); runErr == nil {
 		t.Fatal("expected cancel after idle sleep")
 	}
 	if !slept {
@@ -528,7 +528,7 @@ func TestAgentRunPauseBackoffAndMore(t *testing.T) {
 		}
 		return context.Canceled
 	}
-	if runErr := a3.Run(context.Background()); runErr == nil {
+	if runErr := a3.Run(context.Background(), context.Background()); runErr == nil {
 		t.Fatal("expected cancel")
 	}
 	if pauseSleeps < 2 {
@@ -537,7 +537,7 @@ func TestAgentRunPauseBackoffAndMore(t *testing.T) {
 
 	ctxDone, cancelDone := context.WithCancel(context.Background())
 	cancelDone()
-	if runErr := a3.Run(ctxDone); runErr == nil {
+	if runErr := a3.Run(ctxDone, ctxDone); runErr == nil {
 		t.Fatal("expected ctx err")
 	}
 
@@ -562,7 +562,7 @@ func TestAgentRunPauseBackoffAndMore(t *testing.T) {
 		backoff = d
 		return context.Canceled
 	}
-	if runErr := a4.Run(context.Background()); runErr == nil {
+	if runErr := a4.Run(context.Background(), context.Background()); runErr == nil {
 		t.Fatal("expected cancel")
 	}
 	if backoff < time.Second {

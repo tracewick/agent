@@ -28,12 +28,12 @@ func TestUnreadableSpoolDirYieldsEmptyBacklogAndClaim(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // restore for TempDir cleanup
 
-	if b := src.Backlog(); b.Files != 0 || b.Bytes != 0 {
+	if b := src.Backlog(); !b.Unreadable || b.Files != 0 {
 		t.Fatalf("backlog under locked dir: %#v", b)
 	}
 	claimed, err := src.Claim()
-	if err != nil {
-		t.Fatal(err)
+	if err == nil {
+		t.Fatal("expected claim error on unreadable spool dir")
 	}
 	if claimed != nil {
 		t.Fatalf("claim under locked dir: %#v", claimed)

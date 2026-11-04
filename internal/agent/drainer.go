@@ -41,11 +41,12 @@ func (o Outcome) String() string {
 
 // Result summarizes one Drainer pass.
 type Result struct {
-	Outcome   Outcome
-	Delivered int
-	Rejected  int
-	Failure   string
-	PauseFor  time.Duration // set when OutcomePaused
+	Outcome    Outcome
+	Delivered  int
+	Rejected   int
+	Failure    string
+	PauseFor   time.Duration // set when OutcomePaused
+	RetryAfter time.Duration // lower bound for Agent backoff on OutcomeFailed (Retry-After / 0)
 }
 
 // Drainer runs one delivery pass over the spool (SpoolDrainer domain role).
@@ -66,7 +67,12 @@ type Drainer struct {
 
 // Drain claims a batch, groups by ADR-12 key+window, merges, encodes pprof, pushes,
 // then ack/release/reject using delivery.Classify (agent policy, not PHP reject-on-401).
-func (d *Drainer) Drain(ctx context.Context) Result {
+// admitCtx and pushCtx may be the same; on shutdown admit cancels first so no new claims start
+// while an in-flight push may still use pushCtx until grace expires.
+func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
+	if pushCtx == nil {
+		pushCtx = admitCtx
+	}
 	if d.Log == nil {
 		d.Log = slog.Default()
 	}
@@ -82,7 +88,7 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 		maxBytes = 8 << 20
 	}
 
-	batch, hitBudget, err := d.claimBatch(ctx, maxFiles, maxBytes)
+	batch, hitBudget, err := d.claimBatch(admitCtx, maxFiles, maxBytes)
 	if err != nil {
 		return Result{Outcome: OutcomeFailed, Failure: err.Error()}
 	}
@@ -130,8 +136,39 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 			d.Log.Warn("reject unreadable spool", "file", claimed.Name, "err", parseErr)
 			continue
 		}
+		// Decode compact-stacks now so a corrupt payload cannot poison the whole group later.
+		if _, decErr := pprof.FromSpoolFileLimited(file, pprof.DecodeLimits{
+			MaxStacks:  d.Limits.MaxStacks,
+			MaxFrames:  d.Limits.MaxFrames,
+			MaxStrings: d.Limits.MaxStrings,
+		}); decErr != nil {
+			_ = d.Source.Reject(claimed)
+			held = withoutClaim(held, claimed)
+			rejected++
+			d.Metrics.AddRejected(1)
+			d.Log.Warn("reject undecodable compact-stacks", "file", claimed.Name, "err", decErr)
+			continue
+		}
+		key, keyErr := aggregate.KeyFromFile(file)
+		if keyErr != nil {
+			_ = d.Source.Reject(claimed)
+			held = withoutClaim(held, claimed)
+			rejected++
+			d.Metrics.AddRejected(1)
+			d.Log.Warn("reject bad aggregation key", "file", claimed.Name, "err", keyErr)
+			continue
+		}
+		hint := aggregate.AggregationKeyHintFromName(claimed.Name)
+		if hint != "" && hint != key.Hash() {
+			_ = d.Source.Reject(claimed)
+			held = withoutClaim(held, claimed)
+			rejected++
+			d.Metrics.AddRejected(1)
+			d.Log.Warn("reject name hint / header hash mismatch", "file", claimed.Name, "hint", hint, "header", key.Hash())
+			continue
+		}
 		items = append(items, item{claimed: claimed, file: file})
-		members = append(members, aggregate.Member{File: file, Name: claimed.Name})
+		members = append(members, aggregate.Member{File: file, Name: claimed.Name, HintHash: hint})
 	}
 
 	if len(members) == 0 {
@@ -172,7 +209,7 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 			}
 		}
 
-		decision := d.pushGroup(ctx, &g)
+		decision := d.pushGroup(pushCtx, &g)
 		posts++
 		switch decision.Action {
 		case delivery.ActionAck:
@@ -215,14 +252,20 @@ func (d *Drainer) Drain(ctx context.Context) Result {
 			}
 			d.MaxBatchInputBytes = maxInt64(maxBytes/2, 1)
 			d.Metrics.AddRetried(int64(len(claimedFiles)))
-			d.Log.Warn("413; shrink next batch", "bytes", d.MaxBatchInputBytes, "reason", decision.Reason)
+			d.Log.Warn("413/oversize; shrink next batch", "bytes", d.MaxBatchInputBytes, "reason", decision.Reason)
 			d.setAggRatio(len(members), posts)
 			return Result{Outcome: OutcomeFailed, Delivered: delivered, Rejected: rejected, Failure: decision.Reason}
 		default: // retry / transport → release held (defer) and end pass; Agent backs off
 			d.Metrics.AddRetried(int64(len(claimedFiles)))
 			d.Log.Warn("push failed; releasing held claims", "action", decision.Action.String(), "reason", decision.Reason)
 			d.setAggRatio(len(members), posts)
-			return Result{Outcome: OutcomeFailed, Delivered: delivered, Rejected: rejected, Failure: decision.Reason}
+			return Result{
+				Outcome:    OutcomeFailed,
+				Delivered:  delivered,
+				Rejected:   rejected,
+				Failure:    decision.Reason,
+				RetryAfter: decision.RetryAfter,
+			}
 		}
 	}
 
@@ -243,9 +286,16 @@ func (d *Drainer) setAggRatio(profiles, posts int) {
 
 func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group) delivery.Decision {
 	profiles := make([]*pprof.Profile, 0, len(g.Files))
+	lim := pprof.DecodeLimits{
+		MaxStacks:  d.Limits.MaxStacks,
+		MaxFrames:  d.Limits.MaxFrames,
+		MaxStrings: d.Limits.MaxStrings,
+	}
 	for _, f := range g.Files {
-		p, err := pprof.FromSpoolFile(f)
+		// Already validated in Drain; re-decode for merge (bounded).
+		p, err := pprof.FromSpoolFileLimited(f, lim)
 		if err != nil {
+			// Should not happen after pre-check; treat as reject of this push attempt's batch.
 			return delivery.Decision{Action: delivery.ActionReject, Reason: err.Error()}
 		}
 		profiles = append(profiles, p)
@@ -268,7 +318,11 @@ func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group) delivery.De
 		return delivery.Decision{Action: delivery.ActionReject, Reason: err.Error()}
 	}
 	if int64(len(raw)) > d.Limits.MaxAggregatedPprofBytes { //nolint:gosec // len >= 0
-		return delivery.Decision{Action: delivery.ActionReject, Reason: "aggregated pprof exceeds limit"}
+		// Oversized aggregate of many files → shrink/split; single profile → reject.
+		if len(g.Files) <= 1 {
+			return delivery.Decision{Action: delivery.ActionReject, Reason: "aggregated pprof exceeds limit"}
+		}
+		return delivery.Decision{Action: delivery.ActionShrinkBatch, Reason: "aggregated pprof exceeds limit"}
 	}
 
 	pushCtx := ctx

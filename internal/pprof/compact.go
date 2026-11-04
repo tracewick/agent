@@ -8,10 +8,44 @@ import (
 const (
 	compactSchemaVersion = 1
 	nullIndex            = 0xFFFFFFFF
+	// Minimum on-wire sizes used to reject malicious counts before allocation.
+	compactMinStringRecord = 4  // u32 length prefix
+	compactMinFrameRecord  = 20 // 5 × u32
 )
 
-// DecodeCompactStacks parses an ADR-13 compact-stacks payload into frames and stacks.
+// DecodeLimits caps compact-stacks decode allocations (before BoundedBuilder).
+type DecodeLimits struct {
+	MaxStacks  int
+	MaxFrames  int
+	MaxStrings int
+}
+
+// DefaultDecodeLimits matches BoundedBuilder defaults.
+func DefaultDecodeLimits() DecodeLimits {
+	return DecodeLimits{
+		MaxStacks:  DefaultMaxStacks,
+		MaxFrames:  DefaultMaxFrames,
+		MaxStrings: DefaultMaxStrings,
+	}
+}
+
+// DecodeCompactStacks parses an ADR-13 compact-stacks payload with default caps.
 func DecodeCompactStacks(data []byte) (frames []Frame, stacks []Stack, err error) {
+	return DecodeCompactStacksLimited(data, DefaultDecodeLimits())
+}
+
+// DecodeCompactStacksLimited parses compact-stacks and refuses counts that would
+// allocate beyond lim or beyond the remaining payload (hostile spool files).
+func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, stacks []Stack, err error) {
+	if lim.MaxStacks <= 0 {
+		lim.MaxStacks = DefaultMaxStacks
+	}
+	if lim.MaxFrames <= 0 {
+		lim.MaxFrames = DefaultMaxFrames
+	}
+	if lim.MaxStrings <= 0 {
+		lim.MaxStrings = DefaultMaxStrings
+	}
 	r := &byteReader{data: data}
 	schema, err := r.byte()
 	if err != nil {
@@ -24,7 +58,10 @@ func DecodeCompactStacks(data []byte) (frames []Frame, stacks []Stack, err error
 	if err != nil {
 		return nil, nil, err
 	}
-	strings := make([]string, 0, stringCount)
+	if rcErr := rejectCount("strings", stringCount, lim.MaxStrings, r.remaining(), compactMinStringRecord); rcErr != nil {
+		return nil, nil, rcErr
+	}
+	strings := make([]string, 0, int(stringCount)) //nolint:gosec // bounded by rejectCount
 	for i := uint32(0); i < stringCount; i++ {
 		var length uint32
 		length, err = r.u32()
@@ -43,6 +80,9 @@ func DecodeCompactStacks(data []byte) (frames []Frame, stacks []Stack, err error
 	if err != nil {
 		return nil, nil, err
 	}
+	if int(stackCount) > lim.MaxStacks { //nolint:gosec // stackCount fits int after bound check intent
+		return nil, nil, fmt.Errorf("pprof: compact stacks declares %d stacks; limit is %d", stackCount, lim.MaxStacks)
+	}
 	frameIDs := map[string]int{}
 	for s := uint32(0); s < stackCount; s++ {
 		var weight uint32
@@ -60,7 +100,10 @@ func DecodeCompactStacks(data []byte) (frames []Frame, stacks []Stack, err error
 		if err != nil {
 			return nil, nil, err
 		}
-		ids := make([]int, 0, frameCount)
+		if rcErr := rejectCount("frames", frameCount, lim.MaxFrames, r.remaining(), compactMinFrameRecord); rcErr != nil {
+			return nil, nil, rcErr
+		}
+		ids := make([]int, 0, int(frameCount)) //nolint:gosec // bounded by rejectCount
 		for f := uint32(0); f < frameCount; f++ {
 			var fnIdx, classIdx, fileIdx, line, closureRaw uint32
 			fnIdx, err = r.u32()
@@ -214,6 +257,19 @@ type byteReader struct {
 }
 
 func (r *byteReader) done() bool { return r.off == len(r.data) }
+
+func (r *byteReader) remaining() int { return len(r.data) - r.off }
+
+func rejectCount(kind string, count uint32, limit, remaining, minPer int) error {
+	if int(count) > limit { //nolint:gosec // count compared to configured limit
+		return fmt.Errorf("pprof: compact stacks declares %d %s; limit is %d", count, kind, limit)
+	}
+	need := int64(count) * int64(minPer)
+	if need > int64(remaining) {
+		return fmt.Errorf("pprof: compact stacks declares %d %s but only %d bytes remain", count, kind, remaining)
+	}
+	return nil
+}
 
 func (r *byteReader) byte() (byte, error) {
 	if r.off >= len(r.data) {

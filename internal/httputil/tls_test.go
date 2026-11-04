@@ -27,6 +27,35 @@ func TestNewHTTPClientSystemRoots(t *testing.T) {
 	if err != nil || c == nil || c.Timeout <= 0 {
 		t.Fatalf("%v %#v", err, c)
 	}
+	if c.CheckRedirect == nil {
+		t.Fatal("CheckRedirect must refuse following redirects")
+	}
+}
+
+func TestNewHTTPClientDoesNotFollowRedirect(t *testing.T) {
+	t.Parallel()
+	final := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("login html"))
+	}))
+	t.Cleanup(final.Close)
+	redir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, final.URL, http.StatusFound)
+	}))
+	t.Cleanup(redir.Close)
+
+	client, err := httputil.NewHTTPClient(5*time.Second, httputil.TLSOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := client.Get(redir.URL) //nolint:noctx // test
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d want 302 (no follow)", resp.StatusCode)
+	}
 }
 
 func TestNewHTTPClientCustomCA(t *testing.T) {

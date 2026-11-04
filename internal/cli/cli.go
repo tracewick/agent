@@ -77,16 +77,16 @@ func runAgent(parent context.Context, args []string, stdout, stderr io.Writer) e
 		_, _ = fmt.Fprintf(stderr, "metrics listening on http://%s/metrics\n", metricsSrv.Addr())
 	}
 
-	ctx, stop := delivery.Notify(parent)
+	signalCtx, stop := delivery.Notify(parent)
 	defer stop()
-	workCtx, cancelGrace := delivery.WithGrace(ctx, cfg.ShutdownGrace)
+	admitCtx, pushCtx, cancelGrace := delivery.SplitAdmitGrace(signalCtx, cfg.ShutdownGrace)
 	defer cancelGrace()
 
 	_, _ = fmt.Fprintf(stderr, "tracewick-agent %s starting (spool=%s reader=%s grace=%s)\n",
 		version.String(), cfg.SpoolDir, cfg.ReaderID, cfg.ShutdownGrace)
-	err = a.Run(workCtx)
+	err = a.Run(admitCtx, pushCtx)
 	if errors.Is(err, context.Canceled) {
-		// SIGTERM/SIGINT after shutdown grace — clean process exit.
+		// SIGTERM/SIGINT — clean process exit (admit cancelled; push may have finished in grace).
 		_, _ = fmt.Fprintln(stderr, "tracewick-agent shutdown complete")
 		return nil
 	}

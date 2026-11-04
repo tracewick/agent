@@ -90,6 +90,9 @@ func ClassifyStatus(status int, retryAfter time.Duration, reason string) Decisio
 		return Decision{Action: ActionShrinkBatch, Reason: reason}
 	case status == 400:
 		return Decision{Action: ActionReject, Reason: reason}
+	case status >= 300 && status <= 399:
+		// Redirects must not be followed into a false 2xx ACK (login HTML, etc.).
+		return Decision{Action: ActionPauseEndpoint, Reason: reason}
 	default:
 		// Other 4xx: treat as bad payload (PHP Rejected), not configuration.
 		return Decision{Action: ActionReject, Reason: reason}
@@ -117,9 +120,7 @@ func isTransientNet(err error) bool {
 // attempt is 0-based. When hint (Retry-After) is positive it wins over exponential backoff.
 func Backoff(attempt int, hint, base, maxDelay time.Duration, rng *rand.Rand) time.Duration {
 	if hint > 0 {
-		if maxDelay > 0 && hint > maxDelay {
-			return maxDelay
-		}
+		// Honor Retry-After from the backend; do not clip it to local maxDelay.
 		return hint
 	}
 	if base <= 0 {

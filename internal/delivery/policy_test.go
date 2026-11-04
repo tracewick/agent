@@ -28,6 +28,8 @@ func TestClassifyStatusTable(t *testing.T) {
 		{401, delivery.ActionPauseAuth},
 		{403, delivery.ActionPauseAuth},
 		{404, delivery.ActionPauseEndpoint},
+		{302, delivery.ActionPauseEndpoint},
+		{301, delivery.ActionPauseEndpoint},
 		{413, delivery.ActionShrinkBatch},
 		{400, delivery.ActionReject},
 		{418, delivery.ActionReject},
@@ -100,8 +102,8 @@ func TestBackoff(t *testing.T) {
 	if got := delivery.Backoff(0, 5*time.Second, time.Second, time.Minute, nil); got != 5*time.Second {
 		t.Fatalf("hint = %s", got)
 	}
-	if got := delivery.Backoff(0, time.Hour, time.Second, time.Minute, nil); got != time.Minute {
-		t.Fatalf("hint cap = %s", got)
+	if got := delivery.Backoff(0, time.Hour, time.Second, time.Minute, nil); got != time.Hour {
+		t.Fatalf("Retry-After must not be clipped by maxDelay, got %s", got)
 	}
 	rng := rand.New(rand.NewSource(1)) //nolint:gosec // deterministic test jitter
 	d := delivery.Backoff(0, 0, time.Second, time.Minute, rng)

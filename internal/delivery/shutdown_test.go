@@ -32,10 +32,10 @@ func TestNotifyAndWithGrace(t *testing.T) {
 	}
 }
 
-func TestWithGraceDefaultsAndEarlyCancel(t *testing.T) {
+func TestWithGraceZeroAndEarlyCancel(t *testing.T) {
 	t.Parallel()
 	parent, stopParent := context.WithCancel(context.Background())
-	ctx, cancel := delivery.WithGrace(parent, 0) // default grace
+	ctx, cancel := delivery.WithGrace(parent, 0) // grace 0 → cancel work with admit
 	cancel()                                     // early
 	select {
 	case <-ctx.Done():
@@ -49,11 +49,49 @@ func TestWithGraceDefaultsAndEarlyCancel(t *testing.T) {
 	ctx2, cancel2 := delivery.WithGrace(parent2, time.Hour)
 	defer cancel2()
 	stop2()
-	// Parent cancelled but grace is long — child should still be live briefly.
+	// Parent cancelled but grace is long — work child should still be live briefly.
 	select {
 	case <-ctx2.Done():
 		t.Fatal("child should still be running during grace")
 	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestSplitAdmitGraceStopsAdmitImmediately(t *testing.T) {
+	t.Parallel()
+	parent, stop := context.WithCancel(context.Background())
+	defer stop()
+	admit, work, cancel := delivery.SplitAdmitGrace(parent, time.Hour)
+	defer cancel()
+	stop()
+	select {
+	case <-admit.Done():
+	case <-time.After(time.Second):
+		t.Fatal("admit should cancel immediately")
+	}
+	select {
+	case <-work.Done():
+		t.Fatal("work should still run during long grace")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestSplitAdmitGraceZeroCancelsWorkWithAdmit(t *testing.T) {
+	t.Parallel()
+	parent, stop := context.WithCancel(context.Background())
+	defer stop()
+	admit, work, cancel := delivery.SplitAdmitGrace(parent, 0)
+	defer cancel()
+	stop()
+	select {
+	case <-admit.Done():
+	case <-time.After(time.Second):
+		t.Fatal("admit")
+	}
+	select {
+	case <-work.Done():
+	case <-time.After(time.Second):
+		t.Fatal("work should cancel immediately when grace is 0")
 	}
 }
 

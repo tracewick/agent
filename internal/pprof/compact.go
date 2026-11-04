@@ -11,18 +11,20 @@ const (
 	// Minimum on-wire sizes used to reject malicious counts before allocation.
 	compactMinStringRecord = 4  // u32 length prefix
 	compactMinFrameRecord  = 20 // 5 × u32
-	// MaxOverflowStacks is the extra wire stack PHP BoundedProfileBuilder may append
-	// beyond MaxStacks kept regular stacks ([overflow] sentinel).
-	MaxOverflowStacks = 1
+	// MaxOverflowStacks / MaxOverflowFrames / MaxOverflowStrings are the extra
+	// wire entries PHP BoundedProfileBuilder::toProfileParts may append beyond
+	// the corresponding builder caps (one [overflow] stack + frame + string).
+	MaxOverflowStacks  = 1
+	MaxOverflowFrames  = 1
+	MaxOverflowStrings = 1
 )
 
 // DecodeLimits caps compact-stacks decode resource use (before BoundedBuilder).
 //
-// MaxStacks is the builder/merge regular-stack budget (PHP defaults). The wire
-// may declare up to MaxStacks+MaxOverflowStacks stacks so a capped PHP profile
-// with an overflow sentinel is accepted. MaxFrames caps unique frames across
-// the whole payload; MaxFrameRefs caps total frame references; MaxStringBytes
-// caps the string table payload size.
+// MaxStacks / MaxFrames / MaxStrings are builder/merge regular budgets (PHP
+// defaults). The wire may declare one extra stack, unique frame, and string for
+// the [overflow] sentinel. MaxFrameRefs caps total frame references;
+// MaxStringBytes caps the string table payload size.
 type DecodeLimits struct {
 	MaxStacks      int
 	MaxFrames      int
@@ -57,6 +59,24 @@ func WireStackBudget(lim DecodeLimits) int {
 	return maxStacks + MaxOverflowStacks
 }
 
+// WireFrameBudget is how many unique frames a compact payload may carry for lim.
+func WireFrameBudget(lim DecodeLimits) int {
+	maxFrames := lim.MaxFrames
+	if maxFrames <= 0 {
+		maxFrames = DefaultMaxFrames
+	}
+	return maxFrames + MaxOverflowFrames
+}
+
+// WireStringBudget is how many string-table entries a compact payload may declare.
+func WireStringBudget(lim DecodeLimits) int {
+	maxStrings := lim.MaxStrings
+	if maxStrings <= 0 {
+		maxStrings = DefaultMaxStrings
+	}
+	return maxStrings + MaxOverflowStrings
+}
+
 // DecodeCompactStacks parses an ADR-13 compact-stacks payload with default caps.
 func DecodeCompactStacks(data []byte) (frames []Frame, stacks []Stack, err error) {
 	return DecodeCompactStacksLimited(data, DefaultDecodeLimits())
@@ -78,7 +98,7 @@ func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, 
 	if err != nil {
 		return nil, nil, err
 	}
-	if rcErr := rejectCount("strings", stringCount, lim.MaxStrings, r.remaining(), compactMinStringRecord); rcErr != nil {
+	if rcErr := rejectCount("strings", stringCount, WireStringBudget(lim), r.remaining(), compactMinStringRecord); rcErr != nil {
 		return nil, nil, rcErr
 	}
 	strings := make([]string, 0, int(stringCount)) //nolint:gosec // bounded by rejectCount
@@ -114,6 +134,7 @@ func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, 
 		fn, class, file, line, closure uint32
 	}
 	frameIDs := map[frameWireKey]int{}
+	wireFrames := WireFrameBudget(lim)
 	var frameRefs int
 	for s := uint32(0); s < stackCount; s++ {
 		var weight uint32
@@ -131,8 +152,8 @@ func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, 
 		if err != nil {
 			return nil, nil, err
 		}
-		// Per-stack frame count still bounded by unique-frame budget and remaining bytes.
-		if rcErr := rejectCount("frames", frameCount, lim.MaxFrames, r.remaining(), compactMinFrameRecord); rcErr != nil {
+		// Per-stack frame count still bounded by unique-frame wire budget and remaining bytes.
+		if rcErr := rejectCount("frames", frameCount, wireFrames, r.remaining(), compactMinFrameRecord); rcErr != nil {
 			return nil, nil, rcErr
 		}
 		if frameRefs+int(frameCount) > lim.MaxFrameRefs { //nolint:gosec // frameCount bounded above
@@ -164,8 +185,8 @@ func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, 
 			wk := frameWireKey{fnIdx, classIdx, fileIdx, line, closureRaw}
 			id, ok := frameIDs[wk]
 			if !ok {
-				if len(frames) >= lim.MaxFrames {
-					return nil, nil, fmt.Errorf("pprof: compact stacks exceeds %d unique frames", lim.MaxFrames)
+				if len(frames) >= wireFrames {
+					return nil, nil, fmt.Errorf("pprof: compact stacks exceeds %d unique frames (max frames %d + overflow)", wireFrames, lim.MaxFrames)
 				}
 				var fn, class, file *string
 				fn, err = optionalString(strings, fnIdx)

@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -242,11 +243,15 @@ func TestRefreshSpoolBacklogLogsScanIssues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Force a scan that notes the locked shard, then refresh backlog metrics.
+	// Force a scan that notes the locked shard, then log issues (independent of metrics).
 	if _, err := a.drainer.Source.Claim(); err != nil {
 		t.Fatal(err)
 	}
+	a.logScanIssues()
 	a.refreshSpoolBacklog()
+
+	nilAgent := &Agent{log: slog.Default()}
+	nilAgent.logScanIssues() // early return when drainer/source is nil
 }
 
 func buildSpoolBytes(t *testing.T, header map[string]any, payload []byte) []byte {

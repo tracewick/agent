@@ -17,6 +17,18 @@ func TestDecodeLimitsMapping(t *testing.T) {
 	}
 }
 
+func TestEncodeLimitsMapping(t *testing.T) {
+	t.Parallel()
+	l := delivery.DefaultLimits()
+	e := l.EncodeLimits()
+	if e.MaxStringBytes != l.MaxStringBytes || e.MaxEncodedBytes != int(l.MaxAggregatedPprofBytes) {
+		t.Fatalf("%#v vs %#v", e, l)
+	}
+	if e.MaxNameBytes <= 0 {
+		t.Fatal("MaxNameBytes")
+	}
+}
+
 func TestDefaultLimitsValidate(t *testing.T) {
 	t.Parallel()
 	l := delivery.DefaultLimits()

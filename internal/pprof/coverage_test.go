@@ -51,7 +51,7 @@ func TestUniqueStackCountWithOverflowAndEmptyStackKey(t *testing.T) {
 func TestProtoPackedEmpty(t *testing.T) {
 	t.Parallel()
 	w := &protoWriter{}
-	w.packed(1, nil)
+	_ = w.packed(1, nil)
 	if len(w.buf) != 0 {
 		t.Fatal(w.buf)
 	}

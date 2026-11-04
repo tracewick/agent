@@ -66,7 +66,7 @@ func TestDecodeCompactRejectsTooManyStacks(t *testing.T) {
 
 func TestDecodeCompactAcceptsPHPOverflowStack(t *testing.T) {
 	t.Parallel()
-	// PHP BoundedProfileBuilder: MaxStacks regular stacks + 1 [overflow] sentinel.
+	// BoundedBuilder matches PHP: MaxStacks regular stacks + 1 [overflow] sentinel.
 	const maxStacks = 8
 	b, err := pprof.NewBoundedBuilder(maxStacks, 64, 64)
 	if err != nil {
@@ -76,49 +76,90 @@ func TestDecodeCompactAcceptsPHPOverflowStack(t *testing.T) {
 		fn := "fn-" + strconv.Itoa(i)
 		b.Add([]pprof.Frame{{Function: &fn}}, 3, false)
 	}
+	assertPHPOverflowDecodes(t, b, pprof.DecodeLimits{MaxStacks: maxStacks, MaxFrames: 64, MaxStrings: 64})
+}
+
+func TestDecodeCompactAcceptsPHPOverflowFrame(t *testing.T) {
+	t.Parallel()
+	// Builder keeps MaxFrames regular frames; Parts appends [overflow] → MaxFrames+1.
+	const maxFrames = 8
+	b, err := pprof.NewBoundedBuilder(64, maxFrames, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < maxFrames+5; i++ {
+		fn := "frame-" + strconv.Itoa(i)
+		b.Add([]pprof.Frame{{Function: &fn}}, 2, false)
+	}
 	if !b.WasCapped() || b.OverflowWeight() == 0 {
-		t.Fatalf("expected overflow weight, capped=%v overflow=%d", b.WasCapped(), b.OverflowWeight())
+		t.Fatalf("expected frame overflow, capped=%v overflow=%d", b.WasCapped(), b.OverflowWeight())
 	}
+	frames, _ := b.Parts()
+	if len(frames) != maxFrames+1 {
+		t.Fatalf("parts frames = %d want %d", len(frames), maxFrames+1)
+	}
+	assertPHPOverflowDecodes(t, b, pprof.DecodeLimits{MaxStacks: 64, MaxFrames: maxFrames, MaxStrings: 64})
+}
+
+func TestDecodeCompactAcceptsPHPOverflowString(t *testing.T) {
+	t.Parallel()
+	// MaxStrings regular names; Parts adds "[overflow]" → MaxStrings+1 on wire.
+	const maxStrings = 8
+	b, err := pprof.NewBoundedBuilder(64, 64, maxStrings)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < maxStrings+5; i++ {
+		fn := "str-" + strconv.Itoa(i)
+		b.Add([]pprof.Frame{{Function: &fn}}, 4, false)
+	}
+	if !b.WasCapped() || b.OverflowWeight() == 0 {
+		t.Fatalf("expected string overflow, capped=%v overflow=%d", b.WasCapped(), b.OverflowWeight())
+	}
+	assertPHPOverflowDecodes(t, b, pprof.DecodeLimits{MaxStacks: 64, MaxFrames: 64, MaxStrings: maxStrings})
+}
+
+func assertPHPOverflowDecodes(t *testing.T, b *pprof.BoundedBuilder, lim pprof.DecodeLimits) {
+	t.Helper()
 	frames, stacks := b.Parts()
-	if len(stacks) != maxStacks+1 {
-		t.Fatalf("parts stacks = %d want %d", len(stacks), maxStacks+1)
-	}
+	wantWeight := b.InWeight()
 	payload, err := pprof.EncodeCompactStacks(frames, stacks)
 	if err != nil {
 		t.Fatal(err)
 	}
-	gotFrames, gotStacks, err := pprof.DecodeCompactStacksLimited(payload, pprof.DecodeLimits{
-		MaxStacks: maxStacks, MaxFrames: 64, MaxStrings: 64,
-	})
+	gotFrames, gotStacks, err := pprof.DecodeCompactStacksLimited(payload, lim)
 	if err != nil {
 		t.Fatalf("PHP overflow profile must decode: %v", err)
 	}
-	var in, out uint64
-	for _, s := range stacks {
-		in += uint64(s.Count)
-	}
+	var out uint64
 	for _, s := range gotStacks {
 		out += uint64(s.Count)
 	}
-	if in != out || len(gotFrames) == 0 {
-		t.Fatalf("weight in=%d out=%d frames=%d", in, out, len(gotFrames))
+	if out != wantWeight || len(gotFrames) == 0 {
+		t.Fatalf("weight want=%d got=%d frames=%d", wantWeight, out, len(gotFrames))
 	}
 }
 
-func TestWireStackBudgetDefault(t *testing.T) {
+func TestWireBudgetsDefault(t *testing.T) {
 	t.Parallel()
 	if got := pprof.WireStackBudget(pprof.DecodeLimits{}); got != pprof.DefaultMaxStacks+pprof.MaxOverflowStacks {
-		t.Fatalf("got %d", got)
+		t.Fatalf("stacks got %d", got)
+	}
+	if got := pprof.WireFrameBudget(pprof.DecodeLimits{}); got != pprof.DefaultMaxFrames+pprof.MaxOverflowFrames {
+		t.Fatalf("frames got %d", got)
+	}
+	if got := pprof.WireStringBudget(pprof.DecodeLimits{}); got != pprof.DefaultMaxStrings+pprof.MaxOverflowStrings {
+		t.Fatalf("strings got %d", got)
 	}
 }
 
 func TestDecodeCompactRejectsFrameRefsAndUniqueFrames(t *testing.T) {
 	t.Parallel()
-	// Three stacks with distinct lines; MaxFrames=2 rejects the third unique frame.
+	// MaxFrames=2 → wire budget 3; four unique frames must fail.
 	payload := []byte{1}
 	payload = appendU32Be(payload, 0) // no strings
-	payload = appendU32Be(payload, 3)
-	for _, line := range []uint32{1, 2, 3} {
+	payload = appendU32Be(payload, 4)
+	for _, line := range []uint32{1, 2, 3, 4} {
 		payload = appendU32Be(payload, 1)
 		payload = append(payload, 0)
 		payload = appendU32Be(payload, 1)
@@ -170,14 +211,13 @@ func TestDecodeCompactRejectsHugeStringBytes(t *testing.T) {
 
 func TestDecodeCompactRespectsMaxStrings(t *testing.T) {
 	t.Parallel()
+	// MaxStrings=2 → wire budget 3; four strings must fail.
 	payload := []byte{1}
-	payload = appendU32Be(payload, 3) // stringCount
-	payload = appendU32Be(payload, 1)
-	payload = append(payload, 'a')
-	payload = appendU32Be(payload, 1)
-	payload = append(payload, 'b')
-	payload = appendU32Be(payload, 1)
-	payload = append(payload, 'c')
+	payload = appendU32Be(payload, 4) // stringCount
+	for _, c := range []byte{'a', 'b', 'c', 'd'} {
+		payload = appendU32Be(payload, 1)
+		payload = append(payload, c)
+	}
 	_, _, err := pprof.DecodeCompactStacksLimited(payload, pprof.DecodeLimits{
 		MaxStacks: 10, MaxFrames: 10, MaxStrings: 2,
 	})

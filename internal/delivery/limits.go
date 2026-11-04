@@ -46,7 +46,7 @@ func DefaultLimits() Limits {
 }
 
 // DecodeLimits maps delivery caps onto compact-stacks decode budgets (wire may
-// include one overflow stack beyond MaxStacks).
+// include one overflow stack, frame, and string beyond the builder caps).
 func (l Limits) DecodeLimits() pprof.DecodeLimits {
 	return pprof.DecodeLimits{
 		MaxStacks:      l.MaxStacks,
@@ -54,6 +54,15 @@ func (l Limits) DecodeLimits() pprof.DecodeLimits {
 		MaxStrings:     l.MaxStrings,
 		MaxStringBytes: l.MaxStringBytes,
 		MaxFrameRefs:   l.MaxFrameRefs,
+	}
+}
+
+// EncodeLimits maps delivery caps onto pprof encode budgets.
+func (l Limits) EncodeLimits() pprof.EncodeLimits {
+	return pprof.EncodeLimits{
+		MaxStringBytes:  l.MaxStringBytes,
+		MaxEncodedBytes: int(l.MaxAggregatedPprofBytes), //nolint:gosec // validated positive
+		MaxNameBytes:    pprof.DefaultMaxNameBytes,
 	}
 }
 

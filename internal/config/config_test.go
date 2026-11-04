@@ -181,6 +181,68 @@ func TestDeliveryLimitsOverrides(t *testing.T) {
 	if def.MaxStacks != 4096 {
 		t.Fatalf("defaults %#v", def)
 	}
+	nilCfg := (*config.Config)(nil)
+	if nilCfg.DeliveryLimits().MaxStacks != 4096 {
+		t.Fatal("nil DeliveryLimits")
+	}
+}
+
+func TestLoadDeliveryLimitSeparateFormsAndErrors(t *testing.T) {
+	t.Parallel()
+	empty := func(string) string { return "" }
+	cfg, err := config.Load([]string{
+		"--spool-dir", "/s", "--pyroscope-url", "http://x",
+		"--max-stacks", "11",
+		"--max-frames", "22",
+		"--max-strings", "33",
+		"--max-held-decoded-bytes", "44",
+		"--max-in-flight-bytes", "55",
+	}, empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxStacks != 11 || cfg.MaxFrames != 22 || cfg.MaxStrings != 33 ||
+		cfg.MaxHeldDecodedBytes != 44 || cfg.MaxInFlightBytes != 55 {
+		t.Fatalf("%#v", cfg)
+	}
+
+	badEquals := []string{
+		"--max-stacks=x", "--max-frames=x", "--max-strings=x",
+		"--max-held-decoded-bytes=x", "--max-in-flight-bytes=x",
+	}
+	for _, flag := range badEquals {
+		if _, loadErr := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", flag}, empty); loadErr == nil {
+			t.Fatalf("expected error for %s", flag)
+		}
+	}
+	badSeparate := [][]string{
+		{"--max-stacks", "x"},
+		{"--max-frames", "x"},
+		{"--max-strings", "x"},
+		{"--max-held-decoded-bytes", "x"},
+		{"--max-in-flight-bytes", "x"},
+		{"--max-stacks"},
+		{"--max-frames"},
+		{"--max-strings"},
+		{"--max-held-decoded-bytes"},
+		{"--max-in-flight-bytes"},
+	}
+	for _, args := range badSeparate {
+		full := append([]string{"--spool-dir=/s", "--pyroscope-url=http://x"}, args...)
+		if _, loadErr := config.Load(full, empty); loadErr == nil {
+			t.Fatalf("expected error for %v", args)
+		}
+	}
+	if _, loadErr := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x", "--max-stacks=-1",
+	}, empty); loadErr == nil {
+		t.Fatal("neg stacks")
+	}
+	if _, loadErr := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x", "--max-held-decoded-bytes=-1",
+	}, empty); loadErr == nil {
+		t.Fatal("neg held bytes")
+	}
 }
 
 func TestLoadEqualsFormsAndErrors(t *testing.T) {

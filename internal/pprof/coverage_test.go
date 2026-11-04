@@ -58,6 +58,19 @@ func TestNewBoundedBuilderDefaultsAndBounds(t *testing.T) {
 	if p.EstimatedBytes() <= 0 {
 		t.Fatal("EstimatedBytes")
 	}
+	var nilProf *Profile
+	if nilProf.EstimatedBytes() != 0 {
+		t.Fatal("nil EstimatedBytes")
+	}
+	class, file := "App", "/x.php"
+	rich := &Profile{
+		Frames: []Frame{{Function: strP("f"), Class: &class, File: &file}},
+		Stacks: []Stack{{FrameIDs: []int{0, 0}, Count: 1}},
+		Labels: map[string]string{"env": "prod"},
+	}
+	if rich.EstimatedBytes() <= p.EstimatedBytes() {
+		t.Fatalf("rich estimate %d vs %d", rich.EstimatedBytes(), p.EstimatedBytes())
+	}
 }
 
 func TestUniqueStackCountWithOverflowAndEmptyStackKey(t *testing.T) {

@@ -5,6 +5,7 @@ package spool
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -63,8 +64,9 @@ type Claimed struct {
 
 // Source reads a Tracewick spool directory with rename claims.
 type Source struct {
-	cfg   Config
-	queue []string
+	cfg        Config
+	queue      []string
+	scanIssues []string // non-benign nested scan errors (e.g. EACCES on a shard)
 }
 
 // NewSource validates cfg and returns a directory spool source.
@@ -155,13 +157,38 @@ func (s *Source) scan() ([]string, error) {
 	return files, nil
 }
 
+// TakeScanIssues returns and clears non-benign nested scan diagnostics from the last scan.
+func (s *Source) TakeScanIssues() []string {
+	out := s.scanIssues
+	s.scanIssues = nil
+	return out
+}
+
+func (s *Source) noteScanIssue(prefix string, err error) {
+	msg := fmt.Sprintf("%s: %v", prefix, err)
+	for _, existing := range s.scanIssues {
+		if existing == msg {
+			return
+		}
+	}
+	s.scanIssues = append(s.scanIssues, msg)
+}
+
+func isBenignScanErr(err error) bool {
+	return errors.Is(err, fs.ErrNotExist)
+}
+
 func (s *Source) scanDirectory(directory, prefix string, files *[]string) error {
 	entries, err := osReadDir(directory)
 	if err != nil {
-		// Root spool dir must be readable; nested shard races are ignored.
 		if prefix == "" {
 			return err
 		}
+		// ENOENT on a shard is a normal race; EACCES / other errors are diagnostic.
+		if isBenignScanErr(err) {
+			return nil
+		}
+		s.noteScanIssue(prefix, err)
 		return nil
 	}
 	for _, entry := range entries {
@@ -177,7 +204,6 @@ func (s *Source) scanDirectory(directory, prefix string, files *[]string) error 
 				continue
 			}
 			if shardNameRE.MatchString(name) {
-				// Nested ReadDir failures are races / transient; scanDirectory ignores them when prefix != "".
 				_ = s.scanDirectory(path, relative, files)
 			}
 			continue

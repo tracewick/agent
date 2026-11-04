@@ -557,6 +557,7 @@ func TestAgentRunPauseBackoffAndMore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	a4.rng = nil // deterministic backoff floor for assertion
 	var backoff time.Duration
 	a4.sleep = func(_ context.Context, d time.Duration) error {
 		backoff = d

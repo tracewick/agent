@@ -81,15 +81,6 @@ func (f Frame) closureFromFields() string {
 	return "{closure:" + deref(f.File) + ":" + line + "}"
 }
 
-func (f Frame) key() string {
-	cl := ""
-	if f.ClosureLine != nil {
-		cl = strconv.FormatUint(uint64(*f.ClosureLine), 10)
-	}
-	return deref(f.Function) + "\x00" + deref(f.Class) + "\x00" + deref(f.File) + "\x00" +
-		strconv.FormatUint(uint64(f.Line), 10) + "\x00" + cl
-}
-
 func deref(p *string) string {
 	if p == nil {
 		return ""

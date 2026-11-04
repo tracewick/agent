@@ -36,6 +36,7 @@ func TestLimitsValidationFailures(t *testing.T) {
 		func() delivery.Limits { l := base; l.MaxStrings = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxStrings = 1_000_001; return l }(),
 		func() delivery.Limits { l := base; l.MaxStringBytes = 0; return l }(),
+		func() delivery.Limits { l := base; l.MaxFrameRefs = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxHeldProfiles = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxAggregatedPprofBytes = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxInFlightBytes = 0; return l }(),

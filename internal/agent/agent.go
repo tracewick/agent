@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"time"
 
@@ -25,6 +26,7 @@ type Agent struct {
 	log     *slog.Logger
 	now     func() time.Time
 	sleep   func(context.Context, time.Duration) error
+	rng     *rand.Rand
 }
 
 // New builds an Agent with a pooled HTTP client (connection reuse) and a Drainer.
@@ -98,6 +100,7 @@ func New(cfg *config.Config, log *slog.Logger, httpClient *http.Client, registry
 		log:     log,
 		now:     time.Now,
 		sleep:   sleepCtx,
+		rng:     rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // backoff jitter only
 	}, nil
 }
 
@@ -168,8 +171,8 @@ func (a *Agent) Run(admitCtx, pushCtx context.Context) error {
 		}
 		backoff := a.cfg.Sleep
 		if res.Outcome == OutcomeFailed {
-			// failStreak was just incremented; attempt is 0-based.
-			backoff = delivery.Backoff(failStreak-1, res.RetryAfter, time.Second, 5*time.Minute, nil)
+			// failStreak was just incremented; attempt is 0-based. Retry-After is a floor.
+			backoff = delivery.Backoff(failStreak-1, res.RetryAfter, time.Second, 5*time.Minute, a.rng)
 		}
 		if err := a.sleep(admitCtx, backoff); err != nil {
 			return err
@@ -195,6 +198,9 @@ func (a *Agent) refreshSpoolBacklog() {
 	if b.Unreadable {
 		a.log.Error("spool directory unreadable; backlog metrics not updated")
 		return
+	}
+	if issues := a.drainer.Source.TakeScanIssues(); len(issues) > 0 {
+		a.log.Error("spool scan partial failure", "issues", issues)
 	}
 	a.metrics.SetSpoolBacklog(b.Files, b.Bytes, b.OldestAge)
 }

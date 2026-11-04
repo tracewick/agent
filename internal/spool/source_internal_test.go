@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -151,7 +152,11 @@ func TestScanReadDirFailureAndDefaults(t *testing.T) {
 	}
 	files2, scanErr2 := src2.scan()
 	if scanErr2 != nil || len(files2) != 0 {
-		t.Fatalf("nested shard readdir fail should be ignored: files=%v err=%v", files2, scanErr2)
+		t.Fatalf("nested shard readdir fail should not abort scan: files=%v err=%v", files2, scanErr2)
+	}
+	issues := src2.TakeScanIssues()
+	if len(issues) != 1 || !strings.Contains(issues[0], "shard boom") {
+		t.Fatalf("expected scan issue for EACCES-like shard error, got %v", issues)
 	}
 	if calls < 2 {
 		t.Fatalf("expected root+shard ReadDir, calls=%d", calls)

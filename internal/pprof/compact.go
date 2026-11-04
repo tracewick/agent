@@ -11,22 +11,50 @@ const (
 	// Minimum on-wire sizes used to reject malicious counts before allocation.
 	compactMinStringRecord = 4  // u32 length prefix
 	compactMinFrameRecord  = 20 // 5 × u32
+	// MaxOverflowStacks is the extra wire stack PHP BoundedProfileBuilder may append
+	// beyond MaxStacks kept regular stacks ([overflow] sentinel).
+	MaxOverflowStacks = 1
 )
 
-// DecodeLimits caps compact-stacks decode allocations (before BoundedBuilder).
+// DecodeLimits caps compact-stacks decode resource use (before BoundedBuilder).
+//
+// MaxStacks is the builder/merge regular-stack budget (PHP defaults). The wire
+// may declare up to MaxStacks+MaxOverflowStacks stacks so a capped PHP profile
+// with an overflow sentinel is accepted. MaxFrames caps unique frames across
+// the whole payload; MaxFrameRefs caps total frame references; MaxStringBytes
+// caps the string table payload size.
 type DecodeLimits struct {
-	MaxStacks  int
-	MaxFrames  int
-	MaxStrings int
+	MaxStacks      int
+	MaxFrames      int
+	MaxStrings     int
+	MaxStringBytes int
+	MaxFrameRefs   int
 }
 
-// DefaultDecodeLimits matches BoundedBuilder defaults.
+// DefaultDecodeLimits matches BoundedBuilder defaults plus wire overflow headroom
+// and string-byte / frame-ref budgets.
 func DefaultDecodeLimits() DecodeLimits {
 	return DecodeLimits{
-		MaxStacks:  DefaultMaxStacks,
-		MaxFrames:  DefaultMaxFrames,
-		MaxStrings: DefaultMaxStrings,
+		MaxStacks:      DefaultMaxStacks,
+		MaxFrames:      DefaultMaxFrames,
+		MaxStrings:     DefaultMaxStrings,
+		MaxStringBytes: DefaultMaxStringBytes,
+		MaxFrameRefs:   DefaultMaxFrameRefs,
 	}
+}
+
+const (
+	DefaultMaxStringBytes = 1 << 20 // 1 MiB string table
+	DefaultMaxFrameRefs   = 1 << 20 // total frame slots across stacks
+)
+
+// WireStackBudget is how many stacks a compact payload may declare for lim.
+func WireStackBudget(lim DecodeLimits) int {
+	maxStacks := lim.MaxStacks
+	if maxStacks <= 0 {
+		maxStacks = DefaultMaxStacks
+	}
+	return maxStacks + MaxOverflowStacks
 }
 
 // DecodeCompactStacks parses an ADR-13 compact-stacks payload with default caps.
@@ -37,15 +65,7 @@ func DecodeCompactStacks(data []byte) (frames []Frame, stacks []Stack, err error
 // DecodeCompactStacksLimited parses compact-stacks and refuses counts that would
 // allocate beyond lim or beyond the remaining payload (hostile spool files).
 func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, stacks []Stack, err error) {
-	if lim.MaxStacks <= 0 {
-		lim.MaxStacks = DefaultMaxStacks
-	}
-	if lim.MaxFrames <= 0 {
-		lim.MaxFrames = DefaultMaxFrames
-	}
-	if lim.MaxStrings <= 0 {
-		lim.MaxStrings = DefaultMaxStrings
-	}
+	lim = normalizeDecodeLimits(lim)
 	r := &byteReader{data: data}
 	schema, err := r.byte()
 	if err != nil {
@@ -62,17 +82,22 @@ func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, 
 		return nil, nil, rcErr
 	}
 	strings := make([]string, 0, int(stringCount)) //nolint:gosec // bounded by rejectCount
+	var stringBytes int
 	for i := uint32(0); i < stringCount; i++ {
 		var length uint32
 		length, err = r.u32()
 		if err != nil {
 			return nil, nil, err
 		}
+		if int(length) > lim.MaxStringBytes-stringBytes { //nolint:gosec // length vs remaining budget
+			return nil, nil, fmt.Errorf("pprof: compact stacks string table exceeds %d byte limit", lim.MaxStringBytes)
+		}
 		var s []byte
 		s, err = r.bytes(int(length)) //nolint:gosec // length bounded by remaining payload
 		if err != nil {
 			return nil, nil, err
 		}
+		stringBytes += len(s)
 		strings = append(strings, string(s))
 	}
 	var stackCount uint32
@@ -80,10 +105,16 @@ func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, 
 	if err != nil {
 		return nil, nil, err
 	}
-	if int(stackCount) > lim.MaxStacks { //nolint:gosec // stackCount fits int after bound check intent
-		return nil, nil, fmt.Errorf("pprof: compact stacks declares %d stacks; limit is %d", stackCount, lim.MaxStacks)
+	wireBudget := WireStackBudget(lim)
+	if int(stackCount) > wireBudget { //nolint:gosec // stackCount fits int after bound check intent
+		return nil, nil, fmt.Errorf("pprof: compact stacks declares %d stacks; wire limit is %d (max stacks %d + overflow)", stackCount, wireBudget, lim.MaxStacks)
 	}
-	frameIDs := map[string]int{}
+	// frameWireKey dedupes by string-table indices — never concatenates string bodies into map keys.
+	type frameWireKey struct {
+		fn, class, file, line, closure uint32
+	}
+	frameIDs := map[frameWireKey]int{}
+	var frameRefs int
 	for s := uint32(0); s < stackCount; s++ {
 		var weight uint32
 		weight, err = r.u32()
@@ -100,8 +131,12 @@ func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, 
 		if err != nil {
 			return nil, nil, err
 		}
+		// Per-stack frame count still bounded by unique-frame budget and remaining bytes.
 		if rcErr := rejectCount("frames", frameCount, lim.MaxFrames, r.remaining(), compactMinFrameRecord); rcErr != nil {
 			return nil, nil, rcErr
+		}
+		if frameRefs+int(frameCount) > lim.MaxFrameRefs { //nolint:gosec // frameCount bounded above
+			return nil, nil, fmt.Errorf("pprof: compact stacks exceeds %d total frame references", lim.MaxFrameRefs)
 		}
 		ids := make([]int, 0, int(frameCount)) //nolint:gosec // bounded by rejectCount
 		for f := uint32(0); f < frameCount; f++ {
@@ -126,31 +161,35 @@ func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, 
 			if err != nil {
 				return nil, nil, err
 			}
-			var fn, class, file *string
-			fn, err = optionalString(strings, fnIdx)
-			if err != nil {
-				return nil, nil, err
-			}
-			class, err = optionalString(strings, classIdx)
-			if err != nil {
-				return nil, nil, err
-			}
-			file, err = optionalString(strings, fileIdx)
-			if err != nil {
-				return nil, nil, err
-			}
-			frame := Frame{Function: fn, Class: class, File: file, Line: line}
-			if closureRaw != nullIndex {
-				frame.ClosureLine = u32Ptr(closureRaw)
-			}
-			key := compactFrameKey(fn, class, file, line, closureRaw)
-			id, ok := frameIDs[key]
+			wk := frameWireKey{fnIdx, classIdx, fileIdx, line, closureRaw}
+			id, ok := frameIDs[wk]
 			if !ok {
+				if len(frames) >= lim.MaxFrames {
+					return nil, nil, fmt.Errorf("pprof: compact stacks exceeds %d unique frames", lim.MaxFrames)
+				}
+				var fn, class, file *string
+				fn, err = optionalString(strings, fnIdx)
+				if err != nil {
+					return nil, nil, err
+				}
+				class, err = optionalString(strings, classIdx)
+				if err != nil {
+					return nil, nil, err
+				}
+				file, err = optionalString(strings, fileIdx)
+				if err != nil {
+					return nil, nil, err
+				}
+				frame := Frame{Function: fn, Class: class, File: file, Line: line}
+				if closureRaw != nullIndex {
+					frame.ClosureLine = u32Ptr(closureRaw)
+				}
 				id = len(frames)
-				frameIDs[key] = id
+				frameIDs[wk] = id
 				frames = append(frames, frame)
 			}
 			ids = append(ids, id)
+			frameRefs++
 		}
 		stacks = append(stacks, Stack{FrameIDs: ids, Count: weight, Truncated: flags&1 != 0})
 	}
@@ -158,6 +197,25 @@ func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, 
 		return nil, nil, fmt.Errorf("pprof: compact stacks payload has trailing bytes")
 	}
 	return frames, stacks, nil
+}
+
+func normalizeDecodeLimits(lim DecodeLimits) DecodeLimits {
+	if lim.MaxStacks <= 0 {
+		lim.MaxStacks = DefaultMaxStacks
+	}
+	if lim.MaxFrames <= 0 {
+		lim.MaxFrames = DefaultMaxFrames
+	}
+	if lim.MaxStrings <= 0 {
+		lim.MaxStrings = DefaultMaxStrings
+	}
+	if lim.MaxStringBytes <= 0 {
+		lim.MaxStringBytes = DefaultMaxStringBytes
+	}
+	if lim.MaxFrameRefs <= 0 {
+		lim.MaxFrameRefs = DefaultMaxFrameRefs
+	}
+	return lim
 }
 
 // EncodeCompactStacks writes frames/stacks as ADR-13 compact-stacks bytes.
@@ -225,11 +283,6 @@ func optionalString(strings []string, index uint32) (*string, error) {
 	}
 	s := strings[index]
 	return &s, nil
-}
-
-func compactFrameKey(fn, class, file *string, line, closureRaw uint32) string {
-	return deref(fn) + "\x00" + deref(class) + "\x00" + deref(file) + "\x00" +
-		fmt.Sprintf("%d\x00%d", line, closureRaw)
 }
 
 func appendU32(out []byte, values ...uint32) []byte {

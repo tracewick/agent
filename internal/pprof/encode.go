@@ -260,9 +260,6 @@ func EncodeLimited(p *Profile, lim EncodeLimits) ([]byte, error) {
 	out = append(out, locations.bytesOut()...)
 	out = append(out, functions.bytesOut()...)
 	out = append(out, tail.bytesOut()...)
-	if lim.MaxEncodedBytes > 0 && len(out) > lim.MaxEncodedBytes {
-		return nil, fmt.Errorf("%w: encoded profile is %d bytes; limit is %d", ErrEncodeBudget, len(out), lim.MaxEncodedBytes)
-	}
 	return out, nil
 }
 
@@ -287,7 +284,7 @@ func startLine(frame Frame) uint32 {
 }
 
 func valueType(strings *stringTable, typ, unit string) ([]byte, error) {
-	w := &protoWriter{}
+	w := &protoWriter{} // unbudgeted scratch; counted when copied into the profile head/tail
 	typeIdx, err := strings.index(typ)
 	if err != nil {
 		return nil, err
@@ -296,12 +293,8 @@ func valueType(strings *stringTable, typ, unit string) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if vErr := w.varint(fieldValueTypeType, typeIdx); vErr != nil {
-		return nil, vErr
-	}
-	if vErr := w.varint(fieldValueTypeUnit, unitIdx); vErr != nil {
-		return nil, vErr
-	}
+	_ = w.varint(fieldValueTypeType, typeIdx)
+	_ = w.varint(fieldValueTypeUnit, unitIdx)
 	return w.bytesOut(), nil
 }
 

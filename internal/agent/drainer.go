@@ -313,11 +313,8 @@ func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group, profiles []
 	}
 	raw, err := pprof.EncodeLimited(merged, d.Limits.EncodeLimits())
 	if err != nil {
-		if errors.Is(err, pprof.ErrEncodeBudget) {
-			// Oversized aggregate of many files → shrink/split; single profile → reject.
-			if len(g.Files) <= 1 {
-				return delivery.Decision{Action: delivery.ActionReject, Reason: err.Error()}
-			}
+		// Oversized aggregate of many files → shrink/split; single profile → reject.
+		if errors.Is(err, pprof.ErrEncodeBudget) && len(g.Files) > 1 {
 			return delivery.Decision{Action: delivery.ActionShrinkBatch, Reason: err.Error()}
 		}
 		return delivery.Decision{Action: delivery.ActionReject, Reason: err.Error()}

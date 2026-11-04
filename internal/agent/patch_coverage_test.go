@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"encoding/json"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -248,6 +249,9 @@ func TestRefreshSpoolBacklogLogsScanIssues(t *testing.T) {
 	}
 	a.logScanIssues()
 	a.refreshSpoolBacklog()
+
+	nilAgent := &Agent{log: slog.Default()}
+	nilAgent.logScanIssues() // early return when drainer/source is nil
 }
 
 func buildSpoolBytes(t *testing.T, header map[string]any, payload []byte) []byte {

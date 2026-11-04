@@ -121,7 +121,9 @@ func TestLoadValidation(t *testing.T) {
 		!strings.Contains(usage, "--metrics-listen") ||
 		!strings.Contains(usage, "--tls-ca") ||
 		!strings.Contains(usage, "--shutdown-grace") ||
-		!strings.Contains(usage, "--max-rejected-files") {
+		!strings.Contains(usage, "--max-rejected-files") ||
+		!strings.Contains(usage, "--max-stacks") ||
+		!strings.Contains(usage, "--max-held-decoded-bytes") {
 		t.Fatal("usage")
 	}
 	if _, err := config.Load([]string{"--spool-dir"}, empty); err == nil {
@@ -154,6 +156,92 @@ func TestLoadSeparateFlags(t *testing.T) {
 	}
 	if cfg.MetricsListen != "127.0.0.1:9090" {
 		t.Fatalf("metrics listen %#v", cfg)
+	}
+}
+
+func TestDeliveryLimitsOverrides(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x",
+		"--max-stacks=100", "--max-frames=200", "--max-strings=300",
+		"--max-held-decoded-bytes=1048576", "--max-in-flight-bytes=2097152",
+	}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := cfg.DeliveryLimits()
+	if l.MaxStacks != 100 || l.MaxFrames != 200 || l.MaxStrings != 300 {
+		t.Fatalf("%#v", l)
+	}
+	if l.MaxHeldDecodedBytes != 1<<20 || l.MaxInFlightBytes != 2<<20 {
+		t.Fatalf("%#v", l)
+	}
+	var empty config.Config
+	def := empty.DeliveryLimits()
+	if def.MaxStacks != 4096 {
+		t.Fatalf("defaults %#v", def)
+	}
+	nilCfg := (*config.Config)(nil)
+	if nilCfg.DeliveryLimits().MaxStacks != 4096 {
+		t.Fatal("nil DeliveryLimits")
+	}
+}
+
+func TestLoadDeliveryLimitSeparateFormsAndErrors(t *testing.T) {
+	t.Parallel()
+	empty := func(string) string { return "" }
+	cfg, err := config.Load([]string{
+		"--spool-dir", "/s", "--pyroscope-url", "http://x",
+		"--max-stacks", "11",
+		"--max-frames", "22",
+		"--max-strings", "33",
+		"--max-held-decoded-bytes", "44",
+		"--max-in-flight-bytes", "55",
+	}, empty)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.MaxStacks != 11 || cfg.MaxFrames != 22 || cfg.MaxStrings != 33 ||
+		cfg.MaxHeldDecodedBytes != 44 || cfg.MaxInFlightBytes != 55 {
+		t.Fatalf("%#v", cfg)
+	}
+
+	badEquals := []string{
+		"--max-stacks=x", "--max-frames=x", "--max-strings=x",
+		"--max-held-decoded-bytes=x", "--max-in-flight-bytes=x",
+	}
+	for _, flag := range badEquals {
+		if _, loadErr := config.Load([]string{"--spool-dir=/s", "--pyroscope-url=http://x", flag}, empty); loadErr == nil {
+			t.Fatalf("expected error for %s", flag)
+		}
+	}
+	badSeparate := [][]string{
+		{"--max-stacks", "x"},
+		{"--max-frames", "x"},
+		{"--max-strings", "x"},
+		{"--max-held-decoded-bytes", "x"},
+		{"--max-in-flight-bytes", "x"},
+		{"--max-stacks"},
+		{"--max-frames"},
+		{"--max-strings"},
+		{"--max-held-decoded-bytes"},
+		{"--max-in-flight-bytes"},
+	}
+	for _, args := range badSeparate {
+		full := append([]string{"--spool-dir=/s", "--pyroscope-url=http://x"}, args...)
+		if _, loadErr := config.Load(full, empty); loadErr == nil {
+			t.Fatalf("expected error for %v", args)
+		}
+	}
+	if _, loadErr := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x", "--max-stacks=-1",
+	}, empty); loadErr == nil {
+		t.Fatal("neg stacks")
+	}
+	if _, loadErr := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x", "--max-held-decoded-bytes=-1",
+	}, empty); loadErr == nil {
+		t.Fatal("neg held bytes")
 	}
 }
 

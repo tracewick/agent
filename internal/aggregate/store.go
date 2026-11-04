@@ -6,6 +6,8 @@ import "sync"
 type CounterStore interface {
 	Get(key string) int64
 	Increment(key string) int64
+	Add(key string, delta int64) int64
+	Delete(key string)
 }
 
 // MemoryStore is a process-local store (PHP ArrayCounterStore).
@@ -28,10 +30,33 @@ func (s *MemoryStore) Get(key string) int64 {
 
 // Increment adds one and returns the new value.
 func (s *MemoryStore) Increment(key string) int64 {
+	return s.Add(key, 1)
+}
+
+// Add applies delta and returns the new value (missing keys start at 0).
+func (s *MemoryStore) Add(key string, delta int64) int64 {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.data[key]++
+	s.data[key] += delta
+	if s.data[key] == 0 {
+		delete(s.data, key)
+		return 0
+	}
 	return s.data[key]
+}
+
+// Delete removes a key.
+func (s *MemoryStore) Delete(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.data, key)
+}
+
+// Len returns how many keys are stored (tests).
+func (s *MemoryStore) Len() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return len(s.data)
 }
 
 // All returns a copy of all counters (tests / diagnostics).
@@ -53,3 +78,9 @@ func (NullStore) Get(string) int64 { return 0 }
 
 // Increment is a no-op and returns 0.
 func (NullStore) Increment(string) int64 { return 0 }
+
+// Add is a no-op and returns 0.
+func (NullStore) Add(string, int64) int64 { return 0 }
+
+// Delete is a no-op.
+func (NullStore) Delete(string) {}

@@ -27,9 +27,9 @@ type Limits struct {
 	MaxStringBytes          int
 	MaxFrameRefs            int
 	MaxHeldProfiles         int
-	MaxHeldDecodedBytes     int64 // sum of claimed spool payload bytes held decoded in one pass
+	MaxHeldDecodedBytes     int64 // sum of Profile.EstimatedBytes held decoded in one pass
 	MaxAggregatedPprofBytes int64
-	MaxInFlightBytes        int64 // cap on claimed batch input bytes (and encode payload held for push)
+	MaxInFlightBytes        int64 // cap on sum of claimed spool bytes in a pass and on encoded push payload
 }
 
 // DefaultLimits returns conservative v1 defaults aligned with BoundedBuilder caps where applicable.
@@ -104,7 +104,7 @@ func (l *Limits) Validate() error {
 	return nil
 }
 
-// SampleValue multiplies stack weight by period without overflowing uint64.
+// SampleValue multiplies stack weight by period for pprof sample.value (int64).
 func SampleValue(count uint64, periodNs int64) (uint64, error) {
 	if periodNs < 0 {
 		return 0, fmt.Errorf("delivery: period_ns must be non-negative, got %d", periodNs)
@@ -113,8 +113,8 @@ func SampleValue(count uint64, periodNs int64) (uint64, error) {
 		return 0, nil
 	}
 	period := uint64(periodNs) //nolint:gosec // periodNs >= 0
-	if count > math.MaxUint64/period {
-		return 0, fmt.Errorf("delivery: sample value overflow: count %d × period %d", count, periodNs)
+	if count > uint64(math.MaxInt64)/period {
+		return 0, fmt.Errorf("delivery: sample value overflow: count %d × period %d exceeds int64", count, periodNs)
 	}
 	return count * period, nil
 }

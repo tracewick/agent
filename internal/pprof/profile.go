@@ -34,3 +34,39 @@ func (p *Profile) DurationNs() int64 {
 func (p *Profile) Empty() bool {
 	return p == nil || len(p.Stacks) == 0
 }
+
+// EstimatedBytes is a conservative heap estimate for holding this profile decoded
+// (frames, stacks, labels, string payloads) — not the spool wire size.
+func (p *Profile) EstimatedBytes() int64 {
+	if p == nil {
+		return 0
+	}
+	const (
+		profileOverhead = 96
+		frameOverhead   = 64
+		stackOverhead   = 48
+		ptrSize         = 8
+		mapEntryOver    = 40
+	)
+	n := int64(profileOverhead)
+	for _, f := range p.Frames {
+		n += frameOverhead
+		n += int64(f.EstimatedNameBytes())
+		if f.Function != nil {
+			n += int64(len(*f.Function))
+		}
+		if f.Class != nil {
+			n += int64(len(*f.Class))
+		}
+		if f.File != nil {
+			n += int64(len(*f.File))
+		}
+	}
+	for _, s := range p.Stacks {
+		n += stackOverhead + int64(len(s.FrameIDs))*ptrSize
+	}
+	for k, v := range p.Labels {
+		n += mapEntryOver + int64(len(k)+len(v))
+	}
+	return n
+}

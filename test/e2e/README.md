@@ -18,11 +18,10 @@ still runs (httptest). CI `e2e.yml` starts the stand and exports the env.
 
 ## Path to alpha
 
-README may still say early development until the first `v0.x` tag. That label is
-**not** permission to skip repository lifecycle. M4–M5 close **alpha
-readiness**: stand, Toxiproxy chaos, Querier live round-trip, Go + PHP-drain
-coexistence, CI hygiene (pprof goldens, fuzz, mutation), then a real release
-cut. Soak/load belong with [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks).
+README marks **alpha (`0.1.x`)**, not production readiness. Keep advancing
+release cuts (GoReleaser), honest unsigned notes until cosign, and soak via
+[`tracewick/benchmarks`](https://github.com/tracewick/benchmarks). E2E here
+covers stand, Toxiproxy chaos, Querier live, and Go + PHP-drain coexistence.
 
 ## Canon (parity with `tracewick/tracewick`)
 

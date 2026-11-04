@@ -10,11 +10,10 @@ engineering and release discipline as
 files, aggregates them, encodes **pprof**, and pushes to Pyroscope. The PHP
 library and `tracewick-drain` remain the spool writers / reference drain.
 
-> **Pre-tag status.** The README may say early development until the first
-> `v0.x` (alpha) tag. That label is **not** permission to skip repository
-> lifecycle: stand / Toxiproxy / live Querier / mutation+fuzz+pprof CI / real
-> GoReleaser cuts are the path to alpha. Do not claim production or highload
-> readiness until a tagged release and the maintainers say so.
+> **Alpha (`0.1.x`).** Experimental adoption is fine; do not claim production or
+> highload readiness. Keep advancing stand / Toxiproxy / Querier / mutation+fuzz /
+> real GoReleaser cuts. Soak evidence belongs in
+> [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks).
 
 ## Path to alpha
 
@@ -114,9 +113,13 @@ Releases follow git flow and are automated with
    checksums / images via GoReleaser when enabled).
 4. The workflow opens a pull request merging `main` back into `develop`.
 
-Tags `v*` are protected by a ruleset. The workflow should act as a dedicated
-GitHub App on the bypass list (same pattern as `tracewick/tracewick`). Until the
-App is configured, do not force-push tags by hand.
+Tags `v*` are protected by a ruleset. The workflow uses a dedicated GitHub App
+on the bypass list (same pattern as `tracewick/tracewick`). Do not force-push
+tags by hand.
+
+`v0.1.x` GitHub Releases are **unsigned** until cosign/SBOM land. The empty
+commit `Release-As: 0.1.0` on `develop` pins the first tag number for
+release-please; do not invent tags outside that flow.
 
 ## License
 

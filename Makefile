@@ -20,7 +20,7 @@ PHP_DRAIN_DIR ?= $(CURDIR)/.cache/php-drain
 PHP_DRAIN_BIN ?= $(PHP_DRAIN_DIR)/vendor/bin/tracewick-drain
 
 .PHONY: help tidy fmt fmt-check lint vuln test test-race coverage ci build docker-build e2e \
-	stand-up stand-down stand-smoke pprof-check fuzz-smoke php-drain mutation
+	stand-up stand-down stand-smoke pprof-check fuzz-smoke php-drain mutation goreleaser-check
 
 help: ## Show available targets
 	@grep -E '^[a-zA-Z0-9_-]+:.*##' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "} {printf "  %-14s %s\n", $$1, $$2}'
@@ -64,6 +64,10 @@ build: ## Build the tracewick-agent binary into bin/
 
 docker-build: ## Build the local container image (tracewick-agent:local)
 	docker build -t $(DOCKER_IMAGE) .
+
+goreleaser-check: ## Validate .goreleaser.yaml (does not publish)
+	@command -v goreleaser >/dev/null || $(GO) install github.com/goreleaser/goreleaser/v2@latest
+	goreleaser check
 
 php-drain: ## Install Packagist tracewick/tracewick for Go+PHP-drain e2e
 	@command -v composer >/dev/null || (echo 'composer required for make php-drain' && exit 1)

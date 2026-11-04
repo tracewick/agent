@@ -2,9 +2,9 @@ name: Release
 
 # Git flow releases: a release/* branch is merged into main, then release-please
 # opens a release pull request into main with the changelog and version. Merging
-# that pull request tags vX.Y.Z. GoReleaser publishes artifacts when the tag is
-# created (see .goreleaser.yaml). This workflow then opens a pull request merging
-# main back into develop.
+# that pull request tags vX.Y.Z. GoReleaser publishes binaries + GHCR images when
+# the tag is created (see .goreleaser.yaml). This workflow then opens a pull
+# request merging main back into develop.
 #
 # Prefer a dedicated GitHub App (RELEASE_APP_ID + RELEASE_APP_PRIVATE_KEY) so the
 # App can bypass the tag ruleset and its pull requests trigger CI — same pattern
@@ -36,12 +36,12 @@ jobs:
       - name: Get a GitHub App token
         id: app-token
         if: ${{ vars.RELEASE_APP_ID != '' }}
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-      - uses: googleapis/release-please-action@v4
+      - uses: googleapis/release-please-action@v5
         id: release
         with:
           token: ${{ steps.app-token.outputs.token || github.token }}
@@ -54,9 +54,10 @@ jobs:
     needs: release-please
     if: ${{ needs.release-please.outputs.release_created == 'true' }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     permissions:
       contents: write
+      packages: write
     steps:
       - uses: actions/checkout@v5
         with:
@@ -70,10 +71,22 @@ jobs:
       - name: Get a GitHub App token
         id: app-token
         if: ${{ vars.RELEASE_APP_ID != '' }}
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-packages: write
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
 
       - uses: goreleaser/goreleaser-action@v6
         with:
@@ -95,7 +108,7 @@ jobs:
       - name: Get a GitHub App token
         id: app-token
         if: ${{ vars.RELEASE_APP_ID != '' }}
-        uses: actions/create-github-app-token@v2
+        uses: actions/create-github-app-token@v3
         with:
           app-id: ${{ vars.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

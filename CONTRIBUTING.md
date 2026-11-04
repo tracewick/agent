@@ -23,7 +23,7 @@ Treat upcoming work as **alpha readiness**, not sandbox polish:
 | --- | --- |
 | Delivery proof | Stand + Toxiproxy chaos + Querier live + Go ↔ PHP-drain (see `test/e2e/`) |
 | Test proof | Coverage gates **and** fuzz / `go tool pprof` / mutation (Gremlins or go-mutesting) on core |
-| Release machine | release-please + GoReleaser actually cut artifacts; honest unsigned alpha until cosign |
+| Release machine | release-please + GoReleaser cut binaries + `ghcr.io/tracewick/agent`; unsigned alpha until cosign |
 | Load truth | Soak/load via [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks), not a weak mini-soak here |
 
 Each PR should be a lifecycle slice toward that table. httptest is fine for unit and
@@ -103,21 +103,22 @@ Never push directly to `main` or `develop`.
 
 Releases follow git flow and are automated with
 [release-please](https://github.com/googleapis/release-please) plus
-[GoReleaser](https://goreleaser.com/) (wired fully by M5):
+[GoReleaser](https://goreleaser.com/):
 
 1. Branch `release/<version>` from `develop`, stabilize, merge into `main` with a
    **merge commit** (not squash).
 2. The `Release` workflow opens or updates a `chore: release <version>` pull
    request into `main`.
-3. Merging it tags `v<version>` and publishes the GitHub Release (binaries /
-   checksums / images via GoReleaser when enabled).
+3. Merging it tags `v<version>` and runs GoReleaser: linux amd64/arm64
+   `tar.gz` + `checksums.txt`, multi-arch `ghcr.io/tracewick/agent`, and an
+   **unsigned alpha** footer on the GitHub Release body.
 4. The workflow opens a pull request merging `main` back into `develop`.
 
 Tags `v*` are protected by a ruleset. The workflow uses a dedicated GitHub App
-on the bypass list (same pattern as `tracewick/tracewick`). Do not force-push
-tags by hand.
+(`RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`, on the tag ruleset bypass list —
+same pattern as `tracewick/tracewick`). Do not force-push tags by hand.
 
-`v0.1.x` GitHub Releases are **unsigned** until cosign/SBOM land. The empty
+`v0.1.x` releases stay **unsigned** (no cosign/SBOM) until those land. The empty
 commit `Release-As: 0.1.0` on `develop` pins the first tag number for
 release-please; do not invent tags outside that flow.
 

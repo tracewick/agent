@@ -30,7 +30,12 @@ See [`kubernetes/agent.yaml`](kubernetes/agent.yaml). Set `runAsUser`,
 `runAsGroup`, and `fsGroup` to the same IDs as the application container that
 writes `/var/spool/tracewick`.
 
-## Local image
+## Images
+
+| Source | Image |
+| --- | --- |
+| Local | `make docker-build` → `tracewick-agent:local` |
+| Release | `ghcr.io/tracewick/agent:<version>` (multi-arch amd64/arm64) |
 
 ```bash
 make docker-build
@@ -40,3 +45,5 @@ docker run --rm --user "$(id -u):$(id -g)" \
   -e TRACEWICK_PYROSCOPE_URL=http://host.docker.internal:4040 \
   tracewick-agent:local run --once
 ```
+
+Published tags are **unsigned** until cosign lands; pin by digest when possible.

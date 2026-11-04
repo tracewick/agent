@@ -133,7 +133,7 @@ func assertPHPOverflowDecodes(t *testing.T, b *pprof.BoundedBuilder, lim pprof.D
 	}
 	var out uint64
 	for _, s := range gotStacks {
-		out += uint64(s.Count)
+		out += s.Count
 	}
 	if out != wantWeight || len(gotFrames) == 0 {
 		t.Fatalf("weight want=%d got=%d frames=%d", wantWeight, out, len(gotFrames))

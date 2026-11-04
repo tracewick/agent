@@ -109,7 +109,7 @@ func TestMergeRejectsAndCaps(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var total uint32
+	var total uint64
 	var sawOverflow bool
 	for _, f := range merged.Frames {
 		if f.Function != nil && *f.Function == pprof.OverflowFunction {

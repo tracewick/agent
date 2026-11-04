@@ -60,6 +60,7 @@ func TestLimitsValidationFailures(t *testing.T) {
 		func() delivery.Limits { l := base; l.MaxStringBytes = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxFrameRefs = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxHeldProfiles = 0; return l }(),
+		func() delivery.Limits { l := base; l.MaxHeldDecodedBytes = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxAggregatedPprofBytes = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxInFlightBytes = 0; return l }(),
 	}
@@ -83,7 +84,7 @@ func TestSampleValue(t *testing.T) {
 	if zErr != nil || z != 0 {
 		t.Fatal(z, zErr)
 	}
-	if _, ovErr := delivery.SampleValue(math.MaxUint32, math.MaxInt64); ovErr == nil {
+	if _, ovErr := delivery.SampleValue(math.MaxUint64, math.MaxInt64); ovErr == nil {
 		t.Fatal("overflow")
 	}
 }

@@ -98,24 +98,31 @@ func TestBoundedBuilderValidationAndEmpty(t *testing.T) {
 	}
 }
 
-func TestBoundedBuilderWeightOverflowSaturates(t *testing.T) {
+func TestBoundedBuilderWeightPreservedBeyondUint32(t *testing.T) {
 	t.Parallel()
 	b, err := pprof.NewBoundedBuilder(10, 10, 10)
 	if err != nil {
 		t.Fatal(err)
 	}
 	frames := []pprof.Frame{fr(str("hot"), nil, nil, 0, nil)}
-	b.Add(frames, ^uint32(0), false)
+	b.Add(frames, uint64(^uint32(0)), false)
 	b.Add(frames, 2, false)
-	if b.KeptWeight() != uint64(^uint32(0))+2 {
+	want := uint64(^uint32(0)) + 2
+	if b.KeptWeight() != want {
 		t.Fatalf("keptWeight = %d", b.KeptWeight())
 	}
 	_, stacks := b.Parts()
-	if len(stacks) != 1 {
-		t.Fatalf("stacks = %d", len(stacks))
+	if len(stacks) != 1 || stacks[0].Count != want {
+		t.Fatalf("Parts must keep full weight, got %#v", stacks)
 	}
-	if stacks[0].Count != ^uint32(0) {
-		t.Fatalf("wire count must saturate at MaxUint32, got %d", stacks[0].Count)
+	if _, err := pprof.EncodeCompactStacks(frames, stacks); err == nil {
+		t.Fatal("compact wire must reject weight above uint32")
+	}
+	if _, err := pprof.WireWeight(want); err == nil {
+		t.Fatal("WireWeight must error")
+	}
+	if w, err := pprof.WireWeight(1); err != nil || w != 1 {
+		t.Fatalf("WireWeight(1)=%d %v", w, err)
 	}
 }
 

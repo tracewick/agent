@@ -216,9 +216,62 @@ func TestDrainHeldBudgetAndEmptyPushGroup(t *testing.T) {
 	if res.Delivered != 1 {
 		t.Fatalf("held budget: %#v", res)
 	}
-	dec := a.drainer.pushGroup(context.Background(), &aggregate.Group{}, nil)
+	dec := a.drainer.pushGroup(context.Background(), &aggregate.Group{}, nil, nil)
 	if dec.Action != delivery.ActionReject {
 		t.Fatalf("empty pushGroup: %#v", dec)
+	}
+
+	// MaxHeldDecodedBytes: second file released when held byte budget is 1 byte under two files.
+	dir3 := t.TempDir()
+	for _, name := range []string{
+		"00000000000000000001-aaaaaaaaaaaaaaaa.spool",
+		"00000000000000000002-aaaaaaaaaaaaaaaa.spool",
+	} {
+		if wErr := os.WriteFile(filepath.Join(dir3, name), body, 0o600); wErr != nil { //nolint:gosec // temp
+			t.Fatal(wErr)
+		}
+	}
+	src3, err := spool.NewSource(spool.Config{Directory: dir3, ReaderID: "held-bytes", MaxRejectedFiles: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.drainer.Source = src3
+	a.drainer.Limits.MaxHeldProfiles = 256
+	a.drainer.Limits.MaxHeldDecodedBytes = int64(len(body)) // exactly one file
+	res = a.drainer.Drain(context.Background(), context.Background())
+	if res.Delivered != 1 {
+		t.Fatalf("held decoded bytes budget: %#v", res)
+	}
+}
+
+func TestClaimBatchRejectsOverInFlightCap(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "spool", "v2", "web-request.spool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := "00000000000000000001-aaaaaaaaaaaaaaaa.spool"
+	if wErr := os.WriteFile(filepath.Join(dir, name), body, 0o600); wErr != nil { //nolint:gosec // temp
+		t.Fatal(wErr)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	cfg := config.Config{
+		SpoolDir: dir, PyroscopeURL: srv.URL, ReaderID: "inflight-cap",
+		AggregationWindowSec: 15, StaleClaim: 10 * time.Minute, OwnershipMargin: time.Minute,
+		MaxFilesPerPass: 8, MaxBatchInputBytes: 8 << 20, HTTPTimeout: time.Second, MaxCardinality: 256,
+	}
+	a, err := New(&cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.drainer.Limits.MaxInFlightBytes = 1 // smaller than fixture → reject at claim
+	res := a.drainer.Drain(context.Background(), context.Background())
+	if res.Rejected < 1 || res.Delivered != 0 {
+		t.Fatalf("want reject over MaxInFlightBytes, got %#v", res)
 	}
 }
 

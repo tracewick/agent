@@ -360,8 +360,8 @@ func TestDrainerAckReleaseFailures(t *testing.T) {
 	d := testDrainer(t, dir, srv.URL, nil)
 	res := d.Drain(context.Background(), context.Background())
 	_ = os.Chmod(dir, 0o700) //nolint:gosec // restore
-	if res.Delivered != 1 {
-		t.Fatalf("%#v", res)
+	if res.Outcome != OutcomeFailed || res.Delivered != 0 || res.Failure == "" {
+		t.Fatalf("ack unlink fail must not count delivered: %#v", res)
 	}
 
 	dir2 := t.TempDir()

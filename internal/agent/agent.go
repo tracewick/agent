@@ -223,6 +223,9 @@ func (a *Agent) refreshSpoolBacklog(force bool) {
 		a.log.Error("spool directory unreadable; backlog metrics not updated")
 		return
 	}
+	if b.Incomplete {
+		a.log.Error("spool backlog incomplete; some shards/files were inaccessible")
+	}
 	a.lastBacklogAt = now
 	a.lastBacklogBytes = b.Bytes
 	a.lastBacklogAge = b.OldestAge

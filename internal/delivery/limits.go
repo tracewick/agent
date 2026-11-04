@@ -8,13 +8,14 @@ import (
 )
 
 const (
-	DefaultMaxDecodedBytes    = 32 << 20
-	DefaultMaxHeldProfiles    = 256
-	DefaultMaxAggregatedPprof = 16 << 20
-	DefaultMaxInFlightBytes   = 64 << 20
-	DefaultMaxStringBytes     = pprof.DefaultMaxStringBytes
-	DefaultMaxFrameRefs       = pprof.DefaultMaxFrameRefs
-	minPositive               = 1
+	DefaultMaxDecodedBytes     = 32 << 20
+	DefaultMaxHeldProfiles     = 256
+	DefaultMaxHeldDecodedBytes = 64 << 20
+	DefaultMaxAggregatedPprof  = 16 << 20
+	DefaultMaxInFlightBytes    = 64 << 20
+	DefaultMaxStringBytes      = pprof.DefaultMaxStringBytes
+	DefaultMaxFrameRefs        = pprof.DefaultMaxFrameRefs
+	minPositive                = 1
 )
 
 // Limits caps decode / merge / upload memory before large allocations.
@@ -26,8 +27,9 @@ type Limits struct {
 	MaxStringBytes          int
 	MaxFrameRefs            int
 	MaxHeldProfiles         int
+	MaxHeldDecodedBytes     int64 // sum of claimed spool payload bytes held decoded in one pass
 	MaxAggregatedPprofBytes int64
-	MaxInFlightBytes        int64
+	MaxInFlightBytes        int64 // cap on claimed batch input bytes (and encode payload held for push)
 }
 
 // DefaultLimits returns conservative v1 defaults aligned with BoundedBuilder caps where applicable.
@@ -40,6 +42,7 @@ func DefaultLimits() Limits {
 		MaxStringBytes:          DefaultMaxStringBytes,
 		MaxFrameRefs:            DefaultMaxFrameRefs,
 		MaxHeldProfiles:         DefaultMaxHeldProfiles,
+		MaxHeldDecodedBytes:     DefaultMaxHeldDecodedBytes,
 		MaxAggregatedPprofBytes: DefaultMaxAggregatedPprof,
 		MaxInFlightBytes:        DefaultMaxInFlightBytes,
 	}
@@ -47,7 +50,7 @@ func DefaultLimits() Limits {
 
 // DecodeLimits maps delivery caps onto compact-stacks decode budgets (wire may
 // include one overflow stack, frame, and string beyond the builder caps).
-func (l Limits) DecodeLimits() pprof.DecodeLimits {
+func (l *Limits) DecodeLimits() pprof.DecodeLimits {
 	return pprof.DecodeLimits{
 		MaxStacks:      l.MaxStacks,
 		MaxFrames:      l.MaxFrames,
@@ -58,7 +61,7 @@ func (l Limits) DecodeLimits() pprof.DecodeLimits {
 }
 
 // EncodeLimits maps delivery caps onto pprof encode budgets.
-func (l Limits) EncodeLimits() pprof.EncodeLimits {
+func (l *Limits) EncodeLimits() pprof.EncodeLimits {
 	return pprof.EncodeLimits{
 		MaxStringBytes:  l.MaxStringBytes,
 		MaxEncodedBytes: int(l.MaxAggregatedPprofBytes), //nolint:gosec // validated positive
@@ -67,7 +70,7 @@ func (l Limits) EncodeLimits() pprof.EncodeLimits {
 }
 
 // Validate checks that every limit is positive and within builder hard caps where shared.
-func (l Limits) Validate() error {
+func (l *Limits) Validate() error {
 	if l.MaxDecodedBytes < minPositive {
 		return fmt.Errorf("delivery: max decoded bytes must be >= %d", minPositive)
 	}
@@ -89,6 +92,9 @@ func (l Limits) Validate() error {
 	if l.MaxHeldProfiles < minPositive {
 		return fmt.Errorf("delivery: max held profiles must be >= %d", minPositive)
 	}
+	if l.MaxHeldDecodedBytes < minPositive {
+		return fmt.Errorf("delivery: max held decoded bytes must be >= %d", minPositive)
+	}
 	if l.MaxAggregatedPprofBytes < minPositive {
 		return fmt.Errorf("delivery: max aggregated pprof bytes must be >= %d", minPositive)
 	}
@@ -99,7 +105,7 @@ func (l Limits) Validate() error {
 }
 
 // SampleValue multiplies stack weight by period without overflowing uint64.
-func SampleValue(count uint32, periodNs int64) (uint64, error) {
+func SampleValue(count uint64, periodNs int64) (uint64, error) {
 	if periodNs < 0 {
 		return 0, fmt.Errorf("delivery: period_ns must be non-negative, got %d", periodNs)
 	}
@@ -107,15 +113,14 @@ func SampleValue(count uint32, periodNs int64) (uint64, error) {
 		return 0, nil
 	}
 	period := uint64(periodNs) //nolint:gosec // periodNs >= 0
-	c := uint64(count)
-	if c > math.MaxUint64/period {
+	if count > math.MaxUint64/period {
 		return 0, fmt.Errorf("delivery: sample value overflow: count %d × period %d", count, periodNs)
 	}
-	return c * period, nil
+	return count * period, nil
 }
 
 // AcceptDecoded rejects payloads that already exceed the decoded-size budget before further work.
-func (l Limits) AcceptDecoded(n int) error {
+func (l *Limits) AcceptDecoded(n int) error {
 	if n < 0 {
 		return fmt.Errorf("delivery: decoded size is negative")
 	}

@@ -24,8 +24,17 @@ func TestNewBoundedBuilderDefaultsAndBounds(t *testing.T) {
 	if u32len(-1) != 0 || u32len(int(^uint32(0))+1) != ^uint32(0) {
 		t.Fatal("u32len sat")
 	}
-	if u32sat(uint64(^uint32(0))+1) != ^uint32(0) || u32sat(1) != 1 {
-		t.Fatal("u32sat")
+	if _, err := WireWeight(uint64(^uint32(0)) + 1); err == nil {
+		t.Fatal("WireWeight overflow")
+	}
+	if v, err := sampleValue(3, 10); err != nil || v != 30 {
+		t.Fatalf("sampleValue: %d %v", v, err)
+	}
+	if _, err := sampleValue(1, -1); err == nil {
+		t.Fatal("neg period")
+	}
+	if _, err := sampleValue(^uint64(0), 2); err == nil {
+		t.Fatal("sampleValue overflow")
 	}
 }
 

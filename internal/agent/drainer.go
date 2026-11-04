@@ -89,12 +89,15 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 		maxBytes = 8 << 20
 	}
 
-	batch, hitBudget, err := d.claimBatch(admitCtx, maxFiles, maxBytes)
+	batch, hitBudget, claimRejected, err := d.claimBatch(admitCtx, maxFiles, maxBytes)
 	if err != nil {
-		return Result{Outcome: OutcomeFailed, Failure: err.Error()}
+		return Result{Outcome: OutcomeFailed, Failure: err.Error(), Rejected: claimRejected}
 	}
 	if len(batch) == 0 {
-		return Result{Outcome: OutcomeEmpty}
+		if hitBudget || claimRejected > 0 {
+			return Result{Outcome: OutcomeMore, Rejected: claimRejected}
+		}
+		return Result{Outcome: OutcomeEmpty, Rejected: claimRejected}
 	}
 
 	var batchBytes int64
@@ -114,12 +117,17 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 	}
 	items := make([]item, 0, len(batch))
 	members := make([]aggregate.Member, 0, len(batch))
-	rejected := 0
+	rejected := claimRejected
 	decodeLim := d.Limits.DecodeLimits()
 	maxHeld := d.Limits.MaxHeldProfiles
 	if maxHeld <= 0 {
 		maxHeld = delivery.DefaultMaxHeldProfiles
 	}
+	maxHeldBytes := d.Limits.MaxHeldDecodedBytes
+	if maxHeldBytes <= 0 {
+		maxHeldBytes = delivery.DefaultMaxHeldDecodedBytes
+	}
+	var heldDecodedBytes int64
 
 	for _, claimed := range batch {
 		if d.Ownership.Exhausted(claimed.ClaimedAt, d.Now()) {
@@ -144,8 +152,10 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 			continue
 		}
 		// Decode once: isolate corrupt members and reuse Profile in pushGroup.
-		if len(items) >= maxHeld {
-			d.Log.Warn("held profile budget reached; remaining claims released", "max", maxHeld)
+		claimBytes := int64(len(claimed.Bytes))
+		if len(items) >= maxHeld || heldDecodedBytes+claimBytes > maxHeldBytes {
+			d.Log.Warn("held profile budget reached; remaining claims released",
+				"max_profiles", maxHeld, "max_bytes", maxHeldBytes, "held_bytes", heldDecodedBytes)
 			break
 		}
 		profile, decErr := pprof.FromSpoolFileLimited(file, decodeLim)
@@ -177,6 +187,7 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 		}
 		items = append(items, item{claimed: claimed, file: file, profile: profile})
 		members = append(members, aggregate.Member{File: file, Name: claimed.Name, HintHash: hint})
+		heldDecodedBytes += claimBytes
 	}
 
 	if len(members) == 0 {
@@ -264,18 +275,27 @@ func (d *Drainer) deliverGroup(
 	if len(claimedFiles) == 0 {
 		return 0, 0, nil, nil
 	}
-	decision := d.pushGroup(ctx, g, profiles)
+	decision := d.pushGroup(ctx, g, claimedFiles, profiles)
 	*posts++
 	switch decision.Action {
 	case delivery.ActionAck:
+		acked := 0
 		for _, c := range claimedFiles {
 			if err := d.Source.Acknowledge(c); err != nil {
-				d.Log.Error("ack failed", "file", c.Name, "err", err)
+				// Leave in held so defer Release returns the file to the spool (at-least-once).
+				d.Log.Error("ack failed; keeping claim for release", "file", c.Name, "err", err)
+				continue
 			}
 			*held = withoutClaim(*held, c)
 			delivered++
+			acked++
 		}
-		d.Metrics.AddDelivered(int64(len(claimedFiles)))
+		if acked > 0 {
+			d.Metrics.AddDelivered(int64(acked))
+		}
+		if acked < len(claimedFiles) {
+			return delivered, 0, nil, &Result{Outcome: OutcomeFailed, Failure: "acknowledge failed after successful push"}
+		}
 		return delivered, 0, nil, nil
 	case delivery.ActionReject:
 		for _, c := range claimedFiles {
@@ -316,7 +336,7 @@ func (d *Drainer) deliverGroup(
 	}
 }
 
-func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group, profiles []*pprof.Profile) delivery.Decision {
+func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group, claimedFiles []*spool.Claimed, profiles []*pprof.Profile) delivery.Decision {
 	if len(profiles) == 0 {
 		return delivery.Decision{Action: delivery.ActionReject, Reason: "empty profile group"}
 	}
@@ -336,10 +356,24 @@ func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group, profiles []
 	raw, err := pprof.EncodeLimited(merged, d.Limits.EncodeLimits())
 	if err != nil {
 		// Oversized aggregate of many files → shrink/split; single profile → reject.
-		if errors.Is(err, pprof.ErrEncodeBudget) && len(g.Files) > 1 {
+		if errors.Is(err, pprof.ErrEncodeBudget) && len(claimedFiles) > 1 {
 			return delivery.Decision{Action: delivery.ActionShrinkBatch, Reason: err.Error()}
 		}
 		return delivery.Decision{Action: delivery.ActionReject, Reason: err.Error()}
+	}
+	if int64(len(raw)) > d.Limits.MaxInFlightBytes { //nolint:gosec // len >= 0
+		if len(claimedFiles) <= 1 {
+			return delivery.Decision{Action: delivery.ActionReject, Reason: "encoded pprof exceeds max in-flight bytes"}
+		}
+		return delivery.Decision{Action: delivery.ActionShrinkBatch, Reason: "encoded pprof exceeds max in-flight bytes"}
+	}
+
+	// Re-check ownership immediately before POST (encode/merge may have taken time).
+	now := d.Now()
+	for _, c := range claimedFiles {
+		if d.Ownership.Exhausted(c.ClaimedAt, now) || !d.Ownership.WithinHTTP(c.ClaimedAt, now, d.HTTPTimeout) {
+			return delivery.Decision{Action: delivery.ActionRetry, Reason: "ownership budget exhausted before post"}
+		}
 	}
 
 	pushCtx := ctx
@@ -361,28 +395,45 @@ func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group, profiles []
 	return delivery.Classify(err)
 }
 
-func (d *Drainer) claimBatch(ctx context.Context, maxFiles int, maxBytes int64) ([]*spool.Claimed, bool, error) {
-	batch := make([]*spool.Claimed, 0, maxFiles)
+func (d *Drainer) claimBatch(ctx context.Context, maxFiles int, maxBytes int64) (batch []*spool.Claimed, hitBudget bool, rejected int, err error) {
+	batch = make([]*spool.Claimed, 0, maxFiles)
 	var nbytes int64
-	hitBudget := false
+	inFlightCap := d.Limits.MaxInFlightBytes
+	if inFlightCap <= 0 {
+		inFlightCap = delivery.DefaultMaxInFlightBytes
+	}
 	for i := 0; i < maxFiles; i++ {
-		if err := ctx.Err(); err != nil {
+		if err = ctx.Err(); err != nil {
 			d.releaseAll(batch)
-			return nil, false, err
+			return nil, false, rejected, err
 		}
-		claimed, err := d.Source.Claim()
+		var claimed *spool.Claimed
+		claimed, err = d.Source.Claim()
 		if err != nil {
 			d.releaseAll(batch)
-			return nil, false, err
+			return nil, false, rejected, err
 		}
 		if claimed == nil {
 			break
 		}
 		size := int64(len(claimed.Bytes))
+		if size > inFlightCap {
+			_ = d.Source.Reject(claimed)
+			d.Metrics.AddRejected(1)
+			rejected++
+			d.Log.Warn("reject claim exceeding max in-flight bytes", "file", claimed.Name, "size", size, "cap", inFlightCap)
+			hitBudget = true
+			continue
+		}
+		// First file may exceed maxBytes alone (cannot split a spool file); still
+		// must fit MaxInFlightBytes / MaxDecodedBytes. Further files respect the batch budget.
 		if len(batch) > 0 && nbytes+size > maxBytes {
 			_ = d.Source.Release(claimed)
 			hitBudget = true
 			break
+		}
+		if len(batch) == 0 && size > maxBytes {
+			d.Log.Debug("single claim exceeds batch byte budget; delivering alone", "file", claimed.Name, "size", size, "batch", maxBytes)
 		}
 		batch = append(batch, claimed)
 		nbytes += size
@@ -391,7 +442,7 @@ func (d *Drainer) claimBatch(ctx context.Context, maxFiles int, maxBytes int64) 
 			break
 		}
 	}
-	return batch, hitBudget, nil
+	return batch, hitBudget, rejected, nil
 }
 
 func (d *Drainer) releaseAll(held []*spool.Claimed) {

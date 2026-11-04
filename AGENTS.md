@@ -51,8 +51,18 @@ make stand-down
 ## Rules
 
 - Spool-first; unix socket is v1.1+ with length-prefix framing only.
+- One agent process per spool directory (same UID/GID as PHP writer). Claim
+  rename is race-safe across readers, but each process has its own cardinality
+  gate and may re-deliver after `StaleClaim`.
+- Aggregation window groups files claimed in the current pass only; it does not
+  wait for the window to close. Same logical bucket across two passes → two Push
+  (at-least-once).
+- Decode/merge caps default to PHP `BoundedProfileBuilder` (4096/16384/32768);
+  if PHP raises those, raise matching agent delivery limits or valid profiles
+  are rejected as over budget.
 - Claim rename: `X.spool` → `.X.spool.claimed-<readerId>-<epoch>`.
-- Ack only after Pyroscope HTTP 2xx; at-least-once; duplicates possible.
+- Ack only after Pyroscope HTTP 2xx; at-least-once; duplicates possible. Do not
+  count delivered when Acknowledge/Remove fails — leave claim held for release.
 - HTTP delivery: ack only on 2xx; 408/429/5xx → release+retry; 401/403/404 →
   keep spool (pause, do not reject as trash); 413 → shrink batch (or reject a
   single oversized profile); 400 → reject. Do not invent softer auth behaviour.

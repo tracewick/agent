@@ -11,11 +11,13 @@ type Backlog struct {
 	Bytes      int64
 	OldestAge  time.Duration // zero when Files == 0
 	Unreadable bool          // root spool directory could not be listed (EACCES / missing)
+	Incomplete bool          // some shards/files could not be listed (partial view)
 }
 
 // Backlog scans the spool directory for deliverable files without claiming them.
 // Age uses file ModTime relative to Now (legacy-friendly; claim epoch applies only after claim).
 // When the root directory is unreadable, Unreadable is set and counts stay zero (not "empty").
+// Nested listing failures set Incomplete (counts cover only reachable shards).
 func (s *Source) Backlog() Backlog {
 	now := s.cfg.Now()
 	var out Backlog
@@ -26,6 +28,9 @@ func (s *Source) Backlog() Backlog {
 		if err != nil {
 			if prefix == "" {
 				out.Unreadable = true
+			} else {
+				out.Incomplete = true
+				s.noteScanIssue("backlog "+prefix, err)
 			}
 			return false
 		}
@@ -50,6 +55,10 @@ func (s *Source) Backlog() Backlog {
 			}
 			info, err := osStat(path)
 			if err != nil {
+				if !isBenignScanErr(err) {
+					out.Incomplete = true
+					s.noteScanIssue("backlog "+relative, err)
+				}
 				continue
 			}
 			out.Files++

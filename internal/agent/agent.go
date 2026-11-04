@@ -132,6 +132,7 @@ func (a *Agent) Run(admitCtx, pushCtx context.Context) error {
 
 		a.refreshSpoolBacklog()
 		res := a.drainer.Drain(admitCtx, pushCtx)
+		a.logScanIssues()
 		switch res.Outcome {
 		case OutcomePaused:
 			failStreak = 0
@@ -199,10 +200,18 @@ func (a *Agent) refreshSpoolBacklog() {
 		a.log.Error("spool directory unreadable; backlog metrics not updated")
 		return
 	}
+	a.metrics.SetSpoolBacklog(b.Files, b.Bytes, b.OldestAge)
+}
+
+// logScanIssues reports non-benign shard/file scan errors collected during Drain,
+// independent of metrics. Call after every Drain so --once still surfaces them.
+func (a *Agent) logScanIssues() {
+	if a.drainer == nil || a.drainer.Source == nil {
+		return
+	}
 	if issues := a.drainer.Source.TakeScanIssues(); len(issues) > 0 {
 		a.log.Error("spool scan partial failure", "issues", issues)
 	}
-	a.metrics.SetSpoolBacklog(b.Files, b.Bytes, b.OldestAge)
 }
 
 func sleepCtx(ctx context.Context, d time.Duration) error {

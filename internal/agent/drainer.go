@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -310,16 +311,16 @@ func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group, profiles []
 	if d.Gate != nil {
 		labels = d.Gate.LimitLabels(g.Key.Application, g.Key.Labels, g.Key.EventType, g.Key.PeriodNs)
 	}
-	raw, err := pprof.Encode(merged)
+	raw, err := pprof.EncodeLimited(merged, d.Limits.EncodeLimits())
 	if err != nil {
-		return delivery.Decision{Action: delivery.ActionReject, Reason: err.Error()}
-	}
-	if int64(len(raw)) > d.Limits.MaxAggregatedPprofBytes { //nolint:gosec // len >= 0
-		// Oversized aggregate of many files → shrink/split; single profile → reject.
-		if len(g.Files) <= 1 {
-			return delivery.Decision{Action: delivery.ActionReject, Reason: "aggregated pprof exceeds limit"}
+		if errors.Is(err, pprof.ErrEncodeBudget) {
+			// Oversized aggregate of many files → shrink/split; single profile → reject.
+			if len(g.Files) <= 1 {
+				return delivery.Decision{Action: delivery.ActionReject, Reason: err.Error()}
+			}
+			return delivery.Decision{Action: delivery.ActionShrinkBatch, Reason: err.Error()}
 		}
-		return delivery.Decision{Action: delivery.ActionShrinkBatch, Reason: "aggregated pprof exceeds limit"}
+		return delivery.Decision{Action: delivery.ActionReject, Reason: err.Error()}
 	}
 
 	pushCtx := ctx

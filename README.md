@@ -16,6 +16,24 @@ Early development: git flow, strict CI, lint, and coverage gates are in place.
 Spool claim → aggregate → pprof → Push → ack loop works with `--once` and the
 long-running `run` command; the binary is not production-ready yet.
 
+### Ops assumptions (alpha)
+
+- **One agent process per spool directory**, same UID/GID as the PHP writer.
+  A second agent on the same directory is claim-safe (rename races) but each
+  process has its own cardinality gate and may re-deliver after `StaleClaim`.
+- **Aggregation window** (default 15s) groups files already claimed in the
+  current pass. It does **not** wait for the window to close before push; the
+  same logical bucket split across two passes becomes two Push requests
+  (at-least-once).
+- **Decode / merge limits** default to the PHP `BoundedProfileBuilder` defaults
+  (`4096` stacks / `16384` frames / `32768` strings), plus one wire overflow
+  sentinel. If PHP raises those caps, raise the matching agent delivery limits
+  too — otherwise capped-but-valid profiles are rejected as over budget.
+- **Memory budgets** (`MaxDecodedBytes`, `MaxHeldDecodedBytes`,
+  `MaxInFlightBytes`, encode string/protobuf caps) bound agent allocations;
+  they are not a hard process RSS ceiling (encode still builds intermediate
+  buffers before the final blob).
+
 ## Develop
 
 ```bash

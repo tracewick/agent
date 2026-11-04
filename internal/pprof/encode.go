@@ -185,10 +185,12 @@ func EncodeLimited(p *Profile, lim EncodeLimits) ([]byte, error) {
 			if nameLen > lim.MaxNameBytes {
 				return nil, fmt.Errorf("%w: derived name length %d exceeds %d", ErrEncodeBudget, nameLen, lim.MaxNameBytes)
 			}
-			if strings.remaining() < nameLen {
-				return nil, fmt.Errorf("%w: derived name needs %d string bytes; %d remain", ErrEncodeBudget, nameLen, strings.remaining())
-			}
+			// Materialize within MaxNameBytes; string-table budget is enforced only
+			// when index() inserts a *new* unique entry (reuse costs zero bytes).
 			name := frame.Name()
+			if len(name) > lim.MaxNameBytes {
+				return nil, fmt.Errorf("%w: function name length %d exceeds %d", ErrEncodeBudget, len(name), lim.MaxNameBytes)
+			}
 			id, locErr := locForFrame(frameID, name, frame.File, frame.Line, startLine(frame))
 			if locErr != nil {
 				return nil, locErr
@@ -216,7 +218,11 @@ func EncodeLimited(p *Profile, lim EncodeLimits) ([]byte, error) {
 		}
 		sample := &protoWriter{}
 		_ = sample.packed(fieldSampleLocationID, reversed)
-		_ = sample.packed(fieldSampleValue, []uint64{uint64(stack.Count) * u64bits(p.PeriodNs)})
+		sampleVal, valErr := sampleValue(stack.Count, p.PeriodNs)
+		if valErr != nil {
+			return nil, valErr
+		}
+		_ = sample.packed(fieldSampleValue, []uint64{sampleVal})
 		if spanID != "" {
 			label := &protoWriter{}
 			keyIdx, idxErr := strings.index(sampleLabelSpanID)
@@ -301,6 +307,21 @@ func valueType(strings *stringTable, typ, unit string) ([]byte, error) {
 // u64bits reinterprets a signed int64 as the unsigned bit pattern protobuf expects.
 func u64bits(v int64) uint64 {
 	return uint64(v) //nolint:gosec // intentional two's-complement wire encoding
+}
+
+// sampleValue multiplies stack weight by period without silent uint64 wrap.
+func sampleValue(count uint64, periodNs int64) (uint64, error) {
+	if periodNs < 0 {
+		return 0, fmt.Errorf("pprof: period_ns must be non-negative, got %d", periodNs)
+	}
+	if count == 0 || periodNs == 0 {
+		return 0, nil
+	}
+	period := uint64(periodNs) //nolint:gosec // periodNs >= 0
+	if count > ^uint64(0)/period {
+		return 0, fmt.Errorf("pprof: sample value overflow: count %d × period %d", count, periodNs)
+	}
+	return count * period, nil
 }
 
 type encodeBudget struct {

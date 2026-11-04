@@ -3,9 +3,11 @@ package pprof
 import "github.com/tracewick/agent/internal/spool"
 
 // Stack is a distinct call stack and how often it was observed (outermost caller first).
+// Count is the aggregated sample weight (may exceed uint32 after merge); compact-stacks
+// wire encoding rejects weights above math.MaxUint32 instead of saturating silently.
 type Stack struct {
 	FrameIDs  []int
-	Count     uint32
+	Count     uint64
 	Truncated bool
 }
 

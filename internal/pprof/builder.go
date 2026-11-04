@@ -77,11 +77,11 @@ func NewBoundedBuilder(maxStacks, maxFrames, maxStrings int) (*BoundedBuilder, e
 }
 
 // Add admits a stack (outermost first). Weight < 1 is ignored.
-func (b *BoundedBuilder) Add(frames []Frame, weight uint32, truncated bool) {
+func (b *BoundedBuilder) Add(frames []Frame, weight uint64, truncated bool) {
 	if weight < 1 {
 		return
 	}
-	b.inWeight += uint64(weight)
+	b.inWeight += weight
 
 	// Pending interns are discarded if this stack overflows — do not grow b.interned early.
 	pendingIntern := map[string]*string{}
@@ -146,16 +146,16 @@ func (b *BoundedBuilder) Add(frames []Frame, weight uint32, truncated bool) {
 		stackKey += ",truncated"
 	}
 	if e, ok := b.stacks[stackKey]; ok {
-		e.count += uint64(weight)
+		e.count += weight
 		b.stacks[stackKey] = e
-		b.keptWeight += uint64(weight)
+		b.keptWeight += weight
 		return
 	}
 	if len(b.stacks)+1 > b.maxStacks ||
 		len(b.frames)+len(pending) > b.maxFrames ||
 		len(b.interned)+len(pendingIntern) > b.maxStrings {
 		b.capped = true
-		b.overflowWeight += uint64(weight)
+		b.overflowWeight += weight
 		return
 	}
 	for s, p := range pendingIntern {
@@ -165,25 +165,36 @@ func (b *BoundedBuilder) Add(frames []Frame, weight uint32, truncated bool) {
 		b.frameIDs[p.key] = len(b.frames)
 		b.frames = append(b.frames, p.frame)
 	}
-	b.stacks[stackKey] = stackEntry{ids: ids, count: uint64(weight), truncated: truncated}
+	b.stacks[stackKey] = stackEntry{ids: ids, count: weight, truncated: truncated}
 	b.stackOrder = append(b.stackOrder, stackKey)
-	b.keptWeight += uint64(weight)
+	b.keptWeight += weight
 }
 
 // Parts returns frames and stacks including an overflow frame when needed.
+// Weights are preserved as uint64; callers that need compact-stacks wire form
+// must check WireWeight (EncodeCompactStacks does).
 func (b *BoundedBuilder) Parts() (frames []Frame, stacks []Stack) {
 	frames = append([]Frame(nil), b.frames...)
 	for _, key := range b.stackOrder {
 		e := b.stacks[key]
-		stacks = append(stacks, Stack{FrameIDs: append([]int(nil), e.ids...), Count: u32sat(e.count), Truncated: e.truncated})
+		stacks = append(stacks, Stack{FrameIDs: append([]int(nil), e.ids...), Count: e.count, Truncated: e.truncated})
 	}
 	if b.overflowWeight > 0 {
 		overflowID := len(frames)
 		fn := OverflowFunction
 		frames = append(frames, Frame{Function: &fn})
-		stacks = append(stacks, Stack{FrameIDs: []int{overflowID}, Count: u32sat(b.overflowWeight), Truncated: true})
+		stacks = append(stacks, Stack{FrameIDs: []int{overflowID}, Count: b.overflowWeight, Truncated: true})
 	}
 	return frames, stacks
+}
+
+// WireWeight converts an aggregated count to compact-stacks uint32, or errors
+// instead of saturating (silent weight loss).
+func WireWeight(count uint64) (uint32, error) {
+	if count > uint64(^uint32(0)) {
+		return 0, fmt.Errorf("pprof: stack weight %d exceeds uint32 wire maximum", count)
+	}
+	return uint32(count), nil //nolint:gosec // range-checked
 }
 
 // WasCapped reports whether any weight was diverted to overflow.
@@ -217,13 +228,6 @@ func (b *BoundedBuilder) FrameCount() int { return len(b.frames) }
 
 // StringCount is committed unique non-empty frame strings.
 func (b *BoundedBuilder) StringCount() int { return len(b.interned) }
-
-func u32sat(v uint64) uint32 {
-	if v > uint64(^uint32(0)) {
-		return ^uint32(0)
-	}
-	return uint32(v) //nolint:gosec // range-checked above
-}
 
 func joinIDs(ids []int) string {
 	if len(ids) == 0 {

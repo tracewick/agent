@@ -27,7 +27,15 @@ type Agent struct {
 	now     func() time.Time
 	sleep   func(context.Context, time.Duration) error
 	rng     *rand.Rand
+
+	// Backlog metrics: full directory Stat is expensive; throttle on OutcomeMore.
+	backlogMinInterval time.Duration
+	lastBacklogAt      time.Time
+	lastBacklogBytes   int64
+	lastBacklogAge     time.Duration
 }
+
+const defaultBacklogMinInterval = 5 * time.Second
 
 // New builds an Agent with a pooled HTTP client (connection reuse) and a Drainer.
 // metrics may be nil (instruments become no-ops).
@@ -96,11 +104,12 @@ func New(cfg *config.Config, log *slog.Logger, httpClient *http.Client, registry
 			Now:                time.Now,
 			Metrics:            registry,
 		},
-		metrics: registry,
-		log:     log,
-		now:     time.Now,
-		sleep:   sleepCtx,
-		rng:     rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // backoff jitter only
+		metrics:            registry,
+		log:                log,
+		now:                time.Now,
+		sleep:              sleepCtx,
+		rng:                rand.New(rand.NewSource(time.Now().UnixNano())), //nolint:gosec // backoff jitter only
+		backlogMinInterval: defaultBacklogMinInterval,
 	}, nil
 }
 
@@ -116,6 +125,7 @@ func (a *Agent) Run(admitCtx, pushCtx context.Context) error {
 	}
 	var pauseUntil time.Time
 	failStreak := 0
+	forceBacklog := true
 	for {
 		if err := admitCtx.Err(); err != nil {
 			return err
@@ -130,9 +140,10 @@ func (a *Agent) Run(admitCtx, pushCtx context.Context) error {
 			continue
 		}
 
-		a.refreshSpoolBacklog()
+		a.refreshSpoolBacklog(forceBacklog)
 		res := a.drainer.Drain(admitCtx, pushCtx)
 		a.logScanIssues()
+		forceBacklog = res.Outcome != OutcomeMore
 		switch res.Outcome {
 		case OutcomePaused:
 			failStreak = 0
@@ -191,8 +202,20 @@ func (a *Agent) logDrainPass(res Result, outcome string) {
 	a.log.Info("drain pass", "outcome", outcome, "delivered", res.Delivered, "rejected", res.Rejected)
 }
 
-func (a *Agent) refreshSpoolBacklog() {
+// refreshSpoolBacklog updates spool_* gauges. force=false skips the full directory
+// Stat walk when called again within backlogMinInterval (OutcomeMore tight loop),
+// publishing QueueLen() with the last known bytes/age instead.
+func (a *Agent) refreshSpoolBacklog(force bool) {
 	if a.metrics == nil || a.drainer == nil || a.drainer.Source == nil {
+		return
+	}
+	interval := a.backlogMinInterval
+	if interval <= 0 {
+		interval = defaultBacklogMinInterval
+	}
+	now := a.now()
+	if !force && !a.lastBacklogAt.IsZero() && now.Sub(a.lastBacklogAt) < interval {
+		a.metrics.SetSpoolBacklog(a.drainer.Source.QueueLen(), a.lastBacklogBytes, a.lastBacklogAge)
 		return
 	}
 	b := a.drainer.Source.Backlog()
@@ -200,6 +223,12 @@ func (a *Agent) refreshSpoolBacklog() {
 		a.log.Error("spool directory unreadable; backlog metrics not updated")
 		return
 	}
+	if b.Incomplete {
+		a.log.Error("spool backlog incomplete; some shards/files were inaccessible")
+	}
+	a.lastBacklogAt = now
+	a.lastBacklogBytes = b.Bytes
+	a.lastBacklogAge = b.OldestAge
 	a.metrics.SetSpoolBacklog(b.Files, b.Bytes, b.OldestAge)
 }
 

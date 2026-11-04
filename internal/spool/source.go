@@ -92,6 +92,15 @@ func NewSource(cfg Config) (*Source, error) {
 	return &Source{cfg: cfg}, nil
 }
 
+// QueueLen is the number of unscanned-claim names still buffered after the last scan.
+// It is a cheap backlog hint for metrics; it undercounts files not yet listed.
+func (s *Source) QueueLen() int {
+	if s == nil {
+		return 0
+	}
+	return len(s.queue)
+}
+
 // Claim takes the next available spool file, oldest name first.
 // A non-nil error means the spool directory itself is unusable (missing, EACCES, …),
 // not “empty queue”.
@@ -233,12 +242,17 @@ func (s *Source) tryClaim(name string) *Claimed {
 	source := s.path(name)
 	info, err := osStat(source)
 	if err != nil {
+		if !isBenignScanErr(err) {
+			s.noteScanIssue("claim "+name, err)
+		}
 		return nil
 	}
 	if info.Size() > s.cfg.MaxFileBytes {
 		oversized := s.claimPath(name)
 		if renameErr := osRename(source, oversized); renameErr == nil {
 			_ = s.Reject(&Claimed{Name: name, Path: oversized})
+		} else if !isBenignClaimRace(renameErr) {
+			s.noteScanIssue("claim oversized "+name, renameErr)
 		}
 		return nil
 	}
@@ -246,11 +260,18 @@ func (s *Source) tryClaim(name string) *Claimed {
 	claimedAt := s.cfg.Now().Truncate(time.Second)
 	claimedPath := s.claimPathAt(name, claimedAt)
 	if renameErr := osRename(source, claimedPath); renameErr != nil {
+		// Lost the rename race, or the file vanished — expected under multi-reader.
+		if !isBenignClaimRace(renameErr) {
+			s.noteScanIssue("claim "+name, renameErr)
+		}
 		return nil
 	}
 	data, readErr := osReadFile(claimedPath)
 	if readErr != nil {
 		_ = osRename(claimedPath, source)
+		if !isBenignScanErr(readErr) {
+			s.noteScanIssue("claim read "+name, readErr)
+		}
 		return nil
 	}
 	if int64(len(data)) > s.cfg.MaxFileBytes {
@@ -258,6 +279,10 @@ func (s *Source) tryClaim(name string) *Claimed {
 		return nil
 	}
 	return &Claimed{Name: name, Bytes: data, Path: claimedPath, ClaimedAt: claimedAt}
+}
+
+func isBenignClaimRace(err error) bool {
+	return errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrExist)
 }
 
 func (s *Source) claimPath(name string) string {

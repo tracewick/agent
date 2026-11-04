@@ -9,6 +9,36 @@ import (
 	"github.com/tracewick/agent/internal/spool"
 )
 
+func TestQueueLen(t *testing.T) {
+	t.Parallel()
+	if (&spool.Source{}).QueueLen() != 0 {
+		t.Fatal("empty source")
+	}
+	var nilSrc *spool.Source
+	if nilSrc.QueueLen() != 0 {
+		t.Fatal("nil source")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "00000000000000000001-aaaaaaaaaaaaaaaa.spool"), []byte("x"), 0o600); err != nil { //nolint:gosec // temp
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "00000000000000000002-bbbbbbbbbbbbbbbb.spool"), []byte("y"), 0o600); err != nil { //nolint:gosec // temp
+		t.Fatal(err)
+	}
+	src, err := spool.NewSource(spool.Config{Directory: dir, ReaderID: "qlen"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := src.Claim()
+	if err != nil || claimed == nil {
+		t.Fatalf("claim: %v %#v", err, claimed)
+	}
+	if src.QueueLen() < 1 {
+		t.Fatalf("expected buffered names after scan, got %d", src.QueueLen())
+	}
+	_ = src.Release(claimed)
+}
+
 func TestBacklogCountsUnclaimed(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -45,10 +75,38 @@ func TestBacklogCountsUnclaimed(t *testing.T) {
 	_ = os.Mkdir(filepath.Join(dir, spool.RejectedDirectory), 0o700)          //nolint:gosec // ignored
 
 	b := src.Backlog()
-	if b.Files != 2 || b.Bytes != 10 {
+	if b.Files != 2 || b.Bytes != 10 || b.Incomplete {
 		t.Fatalf("%#v", b)
 	}
 	if b.OldestAge < 89*time.Second || b.OldestAge > 91*time.Second {
 		t.Fatalf("oldest %s", b.OldestAge)
+	}
+}
+
+func TestBacklogIncompleteOnUnreadableShard(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "00000000000000000001-aaaaaaaaaaaaaaaa.spool"), []byte("aa"), 0o600); err != nil { //nolint:gosec // temp
+		t.Fatal(err)
+	}
+	shard := filepath.Join(dir, "ab")
+	if err := os.Mkdir(shard, 0o700); err != nil { //nolint:gosec // temp
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(shard, "00000000000000000002-bbbbbbbbbbbbbbbb.spool"), []byte("bbbb"), 0o600); err != nil { //nolint:gosec // temp
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shard, 0o000); err != nil { //nolint:gosec // intentional
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(shard, 0o700) })
+
+	src, err := spool.NewSource(spool.Config{Directory: dir, ReaderID: "incomplete"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	b := src.Backlog()
+	if !b.Incomplete || b.Files < 1 {
+		t.Fatalf("want incomplete partial backlog, got %#v", b)
 	}
 }

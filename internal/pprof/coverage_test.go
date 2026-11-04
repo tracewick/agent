@@ -24,8 +24,33 @@ func TestNewBoundedBuilderDefaultsAndBounds(t *testing.T) {
 	if u32len(-1) != 0 || u32len(int(^uint32(0))+1) != ^uint32(0) {
 		t.Fatal("u32len sat")
 	}
-	if u32sat(uint64(^uint32(0))+1) != ^uint32(0) || u32sat(1) != 1 {
-		t.Fatal("u32sat")
+	if _, err := WireWeight(uint64(^uint32(0)) + 1); err == nil {
+		t.Fatal("WireWeight overflow")
+	}
+	if v, err := sampleValue(3, 10); err != nil || v != 30 {
+		t.Fatalf("sampleValue: %d %v", v, err)
+	}
+	if _, err := sampleValue(1, -1); err == nil {
+		t.Fatal("neg period")
+	}
+	if z, err := sampleValue(0, 10); err != nil || z != 0 {
+		t.Fatalf("zero count: %d %v", z, err)
+	}
+	if z, err := sampleValue(3, 0); err != nil || z != 0 {
+		t.Fatalf("zero period: %d %v", z, err)
+	}
+	if _, err := sampleValue(^uint64(0), 2); err == nil {
+		t.Fatal("sampleValue overflow")
+	}
+	// Encode path must surface sampleValue overflow (not only the helper).
+	p := &Profile{
+		EventType: spool.EventWall, PeriodNs: 2,
+		StartNs: 1, EndNs: 2,
+		Frames: []Frame{{Function: strP("f")}},
+		Stacks: []Stack{{FrameIDs: []int{0}, Count: ^uint64(0)}},
+	}
+	if _, err := Encode(p); err == nil {
+		t.Fatal("Encode must reject sample value overflow")
 	}
 }
 

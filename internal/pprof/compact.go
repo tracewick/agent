@@ -212,7 +212,7 @@ func DecodeCompactStacksLimited(data []byte, lim DecodeLimits) (frames []Frame, 
 			ids = append(ids, id)
 			frameRefs++
 		}
-		stacks = append(stacks, Stack{FrameIDs: ids, Count: weight, Truncated: flags&1 != 0})
+		stacks = append(stacks, Stack{FrameIDs: ids, Count: uint64(weight), Truncated: flags&1 != 0})
 	}
 	if !r.done() {
 		return nil, nil, fmt.Errorf("pprof: compact stacks payload has trailing bytes")
@@ -277,7 +277,11 @@ func EncodeCompactStacks(frames []Frame, stacks []Stack) ([]byte, error) {
 	}
 	out = appendU32(out, u32len(len(stacks)))
 	for _, stack := range stacks {
-		out = appendU32(out, stack.Count)
+		weight, wErr := WireWeight(stack.Count)
+		if wErr != nil {
+			return nil, wErr
+		}
+		out = appendU32(out, weight)
 		flag := byte(0)
 		if stack.Truncated {
 			flag = 1

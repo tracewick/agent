@@ -245,3 +245,13 @@ func TestClaimedRelativeNameAndAbandonedEpoch(t *testing.T) {
 		t.Fatal("overflow epoch must not count as abandoned via epoch parse")
 	}
 }
+
+func TestIsBenignClaimRace(t *testing.T) {
+	t.Parallel()
+	if !isBenignClaimRace(fs.ErrNotExist) || !isBenignClaimRace(fs.ErrExist) {
+		t.Fatal("ENOENT/EEXIST must be benign")
+	}
+	if isBenignClaimRace(errors.New("permission denied")) {
+		t.Fatal("other errors must surface via noteScanIssue")
+	}
+}

@@ -105,6 +105,50 @@ func TestDecodeCompactAcceptsPHPOverflowStack(t *testing.T) {
 	}
 }
 
+func TestWireStackBudgetDefault(t *testing.T) {
+	t.Parallel()
+	if got := pprof.WireStackBudget(pprof.DecodeLimits{}); got != pprof.DefaultMaxStacks+pprof.MaxOverflowStacks {
+		t.Fatalf("got %d", got)
+	}
+}
+
+func TestDecodeCompactRejectsFrameRefsAndUniqueFrames(t *testing.T) {
+	t.Parallel()
+	// Three stacks with distinct lines; MaxFrames=2 rejects the third unique frame.
+	payload := []byte{1}
+	payload = appendU32Be(payload, 0) // no strings
+	payload = appendU32Be(payload, 3)
+	for _, line := range []uint32{1, 2, 3} {
+		payload = appendU32Be(payload, 1)
+		payload = append(payload, 0)
+		payload = appendU32Be(payload, 1)
+		payload = appendU32Be(payload, 0xffffffff, 0xffffffff, 0xffffffff, line, 0xffffffff)
+	}
+	_, _, err := pprof.DecodeCompactStacksLimited(payload, pprof.DecodeLimits{
+		MaxStacks: 10, MaxFrames: 2, MaxStrings: 10, MaxFrameRefs: 100,
+	})
+	if err == nil {
+		t.Fatal("expected unique frames limit")
+	}
+
+	// Frame refs: MaxFrameRefs=1, one stack with 2 frame slots
+	payload2 := []byte{1}
+	payload2 = appendU32Be(payload2, 0)
+	payload2 = appendU32Be(payload2, 1)
+	payload2 = appendU32Be(payload2, 1)
+	payload2 = append(payload2, 0)
+	payload2 = appendU32Be(payload2, 2)
+	for line := uint32(1); line <= 2; line++ {
+		payload2 = appendU32Be(payload2, 0xffffffff, 0xffffffff, 0xffffffff, line, 0xffffffff)
+	}
+	_, _, err = pprof.DecodeCompactStacksLimited(payload2, pprof.DecodeLimits{
+		MaxStacks: 10, MaxFrames: 10, MaxStrings: 10, MaxFrameRefs: 1,
+	})
+	if err == nil {
+		t.Fatal("expected frame refs limit")
+	}
+}
+
 func TestDecodeCompactRejectsHugeStringBytes(t *testing.T) {
 	t.Parallel()
 	big := make([]byte, 100)

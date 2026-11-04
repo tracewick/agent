@@ -12,7 +12,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/tracewick/agent/internal/aggregate"
 	"github.com/tracewick/agent/internal/config"
+	"github.com/tracewick/agent/internal/delivery"
 	"github.com/tracewick/agent/internal/metrics"
 	"github.com/tracewick/agent/internal/pprof"
 	"github.com/tracewick/agent/internal/spool"
@@ -155,6 +157,96 @@ func TestDrainShrinksOversizedMultiFileAggregate(t *testing.T) {
 	if res.Outcome != OutcomeFailed || res.Failure == "" {
 		t.Fatalf("want shrink/fail on oversize multi aggregate, got %#v", res)
 	}
+}
+
+func TestDrainHeldBudgetAndEmptyPushGroup(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "spool", "v2", "web-request.spool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"00000000000000000001-aaaaaaaaaaaaaaaa.spool",
+		"00000000000000000002-aaaaaaaaaaaaaaaa.spool",
+	} {
+		if wErr := os.WriteFile(filepath.Join(dir, name), body, 0o600); wErr != nil { //nolint:gosec // temp
+			t.Fatal(wErr)
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	cfg := config.Config{
+		SpoolDir: dir, PyroscopeURL: srv.URL, ReaderID: "held-budget",
+		AggregationWindowSec: 15, StaleClaim: 10 * time.Minute, OwnershipMargin: time.Minute,
+		MaxFilesPerPass: 8, MaxBatchInputBytes: 8 << 20, HTTPTimeout: time.Second, MaxCardinality: 256,
+	}
+	a, err := New(&cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.drainer.Limits.MaxHeldProfiles = 0 // exercises defaulting to DefaultMaxHeldProfiles
+	_ = a.drainer.Drain(context.Background(), context.Background())
+	// refill for the capped held-budget pass
+	dir2 := t.TempDir()
+	for _, name := range []string{
+		"00000000000000000001-aaaaaaaaaaaaaaaa.spool",
+		"00000000000000000002-aaaaaaaaaaaaaaaa.spool",
+	} {
+		if wErr := os.WriteFile(filepath.Join(dir2, name), body, 0o600); wErr != nil { //nolint:gosec // temp
+			t.Fatal(wErr)
+		}
+	}
+	src2, err := spool.NewSource(spool.Config{Directory: dir2, ReaderID: "held-budget-2", MaxRejectedFiles: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.drainer.Source = src2
+	a.drainer.Limits.MaxHeldProfiles = 1
+	res := a.drainer.Drain(context.Background(), context.Background())
+	if res.Delivered != 1 {
+		t.Fatalf("held budget: %#v", res)
+	}
+	dec := a.drainer.pushGroup(context.Background(), &aggregate.Group{}, nil)
+	if dec.Action != delivery.ActionReject {
+		t.Fatalf("empty pushGroup: %#v", dec)
+	}
+}
+
+func TestRefreshSpoolBacklogLogsScanIssues(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	shard := filepath.Join(dir, "ab")
+	if err := os.Mkdir(shard, 0o700); err != nil { //nolint:gosec // temp
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shard, 0o000); err != nil { //nolint:gosec // intentional
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(shard, 0o700) })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	cfg := config.Config{
+		SpoolDir: dir, PyroscopeURL: srv.URL, ReaderID: "scan-issues",
+		AggregationWindowSec: 15, StaleClaim: 10 * time.Minute, OwnershipMargin: time.Minute,
+		MaxFilesPerPass: 4, MaxBatchInputBytes: 1 << 20, HTTPTimeout: time.Second, MaxCardinality: 256, Once: true,
+	}
+	reg := metrics.New()
+	a, err := New(&cfg, nil, nil, reg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Force a scan that notes the locked shard, then refresh backlog metrics.
+	if _, err := a.drainer.Source.Claim(); err != nil {
+		t.Fatal(err)
+	}
+	a.refreshSpoolBacklog()
 }
 
 func buildSpoolBytes(t *testing.T, header map[string]any, payload []byte) []byte {

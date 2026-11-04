@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -121,6 +122,50 @@ func TestDrainRejectsEmptyApplicationKey(t *testing.T) {
 	res := a.drainer.Drain(context.Background(), context.Background())
 	if res.Rejected != 1 {
 		t.Fatalf("%#v", res)
+	}
+}
+
+func TestDeliverGroupBisectAbortsOnFirstHalfFailure(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "spool", "v2", "web-request.spool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"00000000000000000001-aaaaaaaaaaaaaaaa.spool",
+		"00000000000000000002-aaaaaaaaaaaaaaaa.spool",
+	} {
+		if wErr := os.WriteFile(filepath.Join(dir, name), body, 0o600); wErr != nil { //nolint:gosec // temp
+			t.Fatal(wErr)
+		}
+	}
+	var posts atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		n := posts.Add(1)
+		switch n {
+		case 1:
+			w.WriteHeader(http.StatusRequestEntityTooLarge) // shrink → bisect
+		case 2:
+			w.WriteHeader(http.StatusBadGateway) // first half fails → early return
+		default:
+			w.WriteHeader(http.StatusOK)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	cfg := config.Config{
+		SpoolDir: dir, PyroscopeURL: srv.URL, ReaderID: "bisect-fail",
+		AggregationWindowSec: 15, StaleClaim: 10 * time.Minute, OwnershipMargin: time.Minute,
+		MaxFilesPerPass: 8, MaxBatchInputBytes: 8 << 20, HTTPTimeout: time.Second, MaxCardinality: 256,
+	}
+	a, err := New(&cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := a.drainer.Drain(context.Background(), context.Background())
+	if res.Outcome != OutcomeFailed {
+		t.Fatalf("want fail after bisect first-half error, got %#v", res)
 	}
 }
 
@@ -242,6 +287,117 @@ func TestDrainHeldBudgetAndEmptyPushGroup(t *testing.T) {
 	if res.Delivered != 1 {
 		t.Fatalf("held decoded bytes budget: %#v", res)
 	}
+}
+
+func TestPushGroupInFlightAndOwnershipBeforePost(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "spool", "v2", "web-request.spool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if wErr := os.WriteFile(filepath.Join(dir, "00000000000000000001-aaaaaaaaaaaaaaaa.spool"), body, 0o600); wErr != nil { //nolint:gosec // temp
+		t.Fatal(wErr)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	cfg := config.Config{
+		SpoolDir: dir, PyroscopeURL: srv.URL, ReaderID: "pre-post",
+		AggregationWindowSec: 15, StaleClaim: 10 * time.Minute, OwnershipMargin: time.Minute,
+		MaxFilesPerPass: 8, MaxBatchInputBytes: 8 << 20, HTTPTimeout: time.Second, MaxCardinality: 256,
+	}
+	a, err := New(&cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	file, parseErr := spool.Parse(body)
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	prof, decErr := pprof.FromSpoolFile(file)
+	if decErr != nil {
+		t.Fatal(decErr)
+	}
+	key, keyErr := aggregate.KeyFromFile(file)
+	if keyErr != nil {
+		t.Fatal(keyErr)
+	}
+	g := &aggregate.Group{Key: key}
+
+	// Encoded payload over MaxInFlightBytes → reject (single) / shrink (multi).
+	a.drainer.Limits.MaxInFlightBytes = 1
+	single := a.drainer.pushGroup(context.Background(), g, []*spool.Claimed{{Name: "a", ClaimedAt: time.Now()}}, []*pprof.Profile{prof})
+	if single.Action != delivery.ActionReject {
+		t.Fatalf("single over inflight: %#v", single)
+	}
+	multi := a.drainer.pushGroup(context.Background(), g,
+		[]*spool.Claimed{{Name: "a"}, {Name: "b"}},
+		[]*pprof.Profile{prof, prof},
+	)
+	if multi.Action != delivery.ActionShrinkBatch {
+		t.Fatalf("multi over inflight: %#v", multi)
+	}
+
+	// Ownership exhausted at the pre-POST re-check.
+	a.drainer.Limits = delivery.DefaultLimits()
+	claimedAt := time.Now().Add(-9 * time.Minute)
+	a.drainer.HTTPTimeout = 2 * time.Minute // remaining budget < HTTP timeout
+	own := a.drainer.pushGroup(context.Background(), g,
+		[]*spool.Claimed{{Name: "a", ClaimedAt: claimedAt}},
+		[]*pprof.Profile{prof},
+	)
+	if own.Action != delivery.ActionRetry || own.Reason == "" {
+		t.Fatalf("ownership before post: %#v", own)
+	}
+
+	// claimBatch defaults MaxInFlightBytes when unset; empty deliverGroup early-return.
+	a.drainer.Limits.MaxInFlightBytes = 0
+	batch, _, _, claimErr := a.drainer.claimBatch(context.Background(), 1, 8<<20)
+	if claimErr != nil {
+		t.Fatal(claimErr)
+	}
+	a.drainer.releaseAll(batch)
+	held := []*spool.Claimed{}
+	posts := 0
+	d, r, p, f := a.drainer.deliverGroup(context.Background(), g, nil, nil, &held, &posts)
+	if d != 0 || r != 0 || p != nil || f != nil {
+		t.Fatalf("empty deliverGroup: %d %d %#v %#v", d, r, p, f)
+	}
+	a.drainer.setAggRatio(3, 0)
+}
+
+func TestRefreshBacklogDefaultIntervalAndIncomplete(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "00000000000000000001-aaaaaaaaaaaaaaaa.spool"), []byte("x"), 0o600); err != nil { //nolint:gosec // temp
+		t.Fatal(err)
+	}
+	shard := filepath.Join(dir, "ab")
+	if err := os.Mkdir(shard, 0o700); err != nil { //nolint:gosec // temp
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shard, 0o000); err != nil { //nolint:gosec // intentional
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(shard, 0o700) })
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	cfg := config.Config{
+		SpoolDir: dir, PyroscopeURL: srv.URL, ReaderID: "backlog-incomplete",
+		AggregationWindowSec: 15, StaleClaim: 10 * time.Minute, OwnershipMargin: time.Minute,
+		MaxFilesPerPass: 4, MaxBatchInputBytes: 1 << 20, HTTPTimeout: time.Second, MaxCardinality: 256,
+	}
+	a, err := New(&cfg, nil, nil, metrics.New())
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.backlogMinInterval = 0 // force defaultBacklogMinInterval branch
+	a.refreshSpoolBacklog(true)
 }
 
 func TestClaimBatchRejectsOverInFlightCap(t *testing.T) {

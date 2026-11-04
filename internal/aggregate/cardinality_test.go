@@ -85,6 +85,19 @@ func TestCardinalityTTLFreesSlots(t *testing.T) {
 	assertLabels(t, third, map[string]string{"route": "b"})
 }
 
+func TestCardinalityNilSetters(t *testing.T) {
+	t.Parallel()
+	var nilGate *aggregate.CardinalityGate
+	nilGate.SetTTL(time.Second)
+	nilGate.SetNow(time.Now)
+	gate, err := aggregate.NewCardinalityGate(aggregate.NewMemoryStore(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate.SetTTL(0) // keep default
+	gate.SetNow(nil)
+}
+
 func TestCardinalityAdmitSerialized(t *testing.T) {
 	t.Parallel()
 	gate, err := aggregate.NewCardinalityGate(aggregate.NewMemoryStore(), 2)

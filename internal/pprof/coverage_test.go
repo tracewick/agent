@@ -33,8 +33,24 @@ func TestNewBoundedBuilderDefaultsAndBounds(t *testing.T) {
 	if _, err := sampleValue(1, -1); err == nil {
 		t.Fatal("neg period")
 	}
+	if z, err := sampleValue(0, 10); err != nil || z != 0 {
+		t.Fatalf("zero count: %d %v", z, err)
+	}
+	if z, err := sampleValue(3, 0); err != nil || z != 0 {
+		t.Fatalf("zero period: %d %v", z, err)
+	}
 	if _, err := sampleValue(^uint64(0), 2); err == nil {
 		t.Fatal("sampleValue overflow")
+	}
+	// Encode path must surface sampleValue overflow (not only the helper).
+	p := &Profile{
+		EventType: spool.EventWall, PeriodNs: 2,
+		StartNs: 1, EndNs: 2,
+		Frames: []Frame{{Function: strP("f")}},
+		Stacks: []Stack{{FrameIDs: []int{0}, Count: ^uint64(0)}},
+	}
+	if _, err := Encode(p); err == nil {
+		t.Fatal("Encode must reject sample value overflow")
 	}
 }
 

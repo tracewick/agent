@@ -58,8 +58,8 @@ make stand-down
   wait for the window to close. Same logical bucket across two passes → two Push
   (at-least-once).
 - Decode/merge caps default to PHP `BoundedProfileBuilder` (4096/16384/32768);
-  if PHP raises those, raise matching agent delivery limits or valid profiles
-  are rejected as over budget.
+  if PHP raises those, raise matching agent flags (`--max-stacks` /
+  `--max-frames` / `--max-strings`) or valid profiles are rejected as over budget.
 - Claim rename: `X.spool` → `.X.spool.claimed-<readerId>-<epoch>`.
 - Ack only after Pyroscope HTTP 2xx; at-least-once; duplicates possible. Do not
   count delivered when Acknowledge/Remove fails — leave claim held for release.

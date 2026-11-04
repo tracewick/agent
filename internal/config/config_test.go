@@ -121,7 +121,9 @@ func TestLoadValidation(t *testing.T) {
 		!strings.Contains(usage, "--metrics-listen") ||
 		!strings.Contains(usage, "--tls-ca") ||
 		!strings.Contains(usage, "--shutdown-grace") ||
-		!strings.Contains(usage, "--max-rejected-files") {
+		!strings.Contains(usage, "--max-rejected-files") ||
+		!strings.Contains(usage, "--max-stacks") ||
+		!strings.Contains(usage, "--max-held-decoded-bytes") {
 		t.Fatal("usage")
 	}
 	if _, err := config.Load([]string{"--spool-dir"}, empty); err == nil {
@@ -154,6 +156,30 @@ func TestLoadSeparateFlags(t *testing.T) {
 	}
 	if cfg.MetricsListen != "127.0.0.1:9090" {
 		t.Fatalf("metrics listen %#v", cfg)
+	}
+}
+
+func TestDeliveryLimitsOverrides(t *testing.T) {
+	t.Parallel()
+	cfg, err := config.Load([]string{
+		"--spool-dir=/s", "--pyroscope-url=http://x",
+		"--max-stacks=100", "--max-frames=200", "--max-strings=300",
+		"--max-held-decoded-bytes=1048576", "--max-in-flight-bytes=2097152",
+	}, func(string) string { return "" })
+	if err != nil {
+		t.Fatal(err)
+	}
+	l := cfg.DeliveryLimits()
+	if l.MaxStacks != 100 || l.MaxFrames != 200 || l.MaxStrings != 300 {
+		t.Fatalf("%#v", l)
+	}
+	if l.MaxHeldDecodedBytes != 1<<20 || l.MaxInFlightBytes != 2<<20 {
+		t.Fatalf("%#v", l)
+	}
+	var empty config.Config
+	def := empty.DeliveryLimits()
+	if def.MaxStacks != 4096 {
+		t.Fatalf("defaults %#v", def)
 	}
 }
 

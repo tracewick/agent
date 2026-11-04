@@ -128,6 +128,7 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 		maxHeldBytes = delivery.DefaultMaxHeldDecodedBytes
 	}
 	var heldDecodedBytes int64
+	heldBudgetHit := false
 
 	for _, claimed := range batch {
 		if d.Ownership.Exhausted(claimed.ClaimedAt, d.Now()) {
@@ -152,12 +153,6 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 			continue
 		}
 		// Decode once: isolate corrupt members and reuse Profile in pushGroup.
-		claimBytes := int64(len(claimed.Bytes))
-		if len(items) >= maxHeld || heldDecodedBytes+claimBytes > maxHeldBytes {
-			d.Log.Warn("held profile budget reached; remaining claims released",
-				"max_profiles", maxHeld, "max_bytes", maxHeldBytes, "held_bytes", heldDecodedBytes)
-			break
-		}
 		profile, decErr := pprof.FromSpoolFileLimited(file, decodeLim)
 		if decErr != nil {
 			_ = d.Source.Reject(claimed)
@@ -166,6 +161,23 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 			d.Metrics.AddRejected(1)
 			d.Log.Warn("reject undecodable compact-stacks", "file", claimed.Name, "err", decErr)
 			continue
+		}
+		est := profile.EstimatedBytes()
+		if est > maxHeldBytes {
+			// Single profile cannot fit the held decoded budget under this config.
+			_ = d.Source.Reject(claimed)
+			held = withoutClaim(held, claimed)
+			rejected++
+			d.Metrics.AddRejected(1)
+			d.Log.Warn("reject profile exceeding max held decoded bytes",
+				"file", claimed.Name, "estimated", est, "cap", maxHeldBytes)
+			continue
+		}
+		if len(items) >= maxHeld || heldDecodedBytes+est > maxHeldBytes {
+			heldBudgetHit = true
+			d.Log.Warn("held profile budget reached; remaining claims released",
+				"max_profiles", maxHeld, "max_bytes", maxHeldBytes, "held_bytes", heldDecodedBytes)
+			break
 		}
 		key, keyErr := aggregate.KeyFromFile(file)
 		if keyErr != nil {
@@ -187,11 +199,11 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 		}
 		items = append(items, item{claimed: claimed, file: file, profile: profile})
 		members = append(members, aggregate.Member{File: file, Name: claimed.Name, HintHash: hint})
-		heldDecodedBytes += claimBytes
+		heldDecodedBytes += est
 	}
 
 	if len(members) == 0 {
-		if hitBudget || len(batch) >= maxFiles {
+		if hitBudget || heldBudgetHit || len(batch) >= maxFiles {
 			return Result{Outcome: OutcomeMore, Rejected: rejected}
 		}
 		return Result{Outcome: OutcomeEmpty, Rejected: rejected}
@@ -248,7 +260,7 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 	}
 
 	d.setAggRatio(len(members), posts)
-	if hitBudget || len(batch) >= maxFiles {
+	if hitBudget || heldBudgetHit || len(batch) >= maxFiles {
 		return Result{Outcome: OutcomeMore, Delivered: delivered, Rejected: rejected}
 	}
 	return Result{Outcome: OutcomeEmpty, Delivered: delivered, Rejected: rejected}
@@ -426,8 +438,8 @@ func (d *Drainer) claimBatch(ctx context.Context, maxFiles int, maxBytes int64) 
 			continue
 		}
 		// First file may exceed maxBytes alone (cannot split a spool file); still
-		// must fit MaxInFlightBytes / MaxDecodedBytes. Further files respect the batch budget.
-		if len(batch) > 0 && nbytes+size > maxBytes {
+		// must fit MaxInFlightBytes. Further files respect both batch and in-flight sum caps.
+		if len(batch) > 0 && (nbytes+size > maxBytes || nbytes+size > inFlightCap) {
 			_ = d.Source.Release(claimed)
 			hitBudget = true
 			break
@@ -437,7 +449,7 @@ func (d *Drainer) claimBatch(ctx context.Context, maxFiles int, maxBytes int64) 
 		}
 		batch = append(batch, claimed)
 		nbytes += size
-		if nbytes >= maxBytes {
+		if nbytes >= maxBytes || nbytes >= inFlightCap {
 			hitBudget = true
 			break
 		}

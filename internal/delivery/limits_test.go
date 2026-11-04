@@ -84,6 +84,9 @@ func TestSampleValue(t *testing.T) {
 	if zErr != nil || z != 0 {
 		t.Fatal(z, zErr)
 	}
+	if _, ovErr := delivery.SampleValue(2, 1<<62); ovErr == nil {
+		t.Fatal("int64 overflow")
+	}
 	if _, ovErr := delivery.SampleValue(math.MaxUint64, math.MaxInt64); ovErr == nil {
 		t.Fatal("overflow")
 	}

@@ -309,7 +309,8 @@ func u64bits(v int64) uint64 {
 	return uint64(v) //nolint:gosec // intentional two's-complement wire encoding
 }
 
-// sampleValue multiplies stack weight by period without silent uint64 wrap.
+// sampleValue multiplies stack weight by period for pprof sample.value (int64).
+// Rejects products that would exceed math.MaxInt64 (unsigned wrap or signed negation).
 func sampleValue(count uint64, periodNs int64) (uint64, error) {
 	if periodNs < 0 {
 		return 0, fmt.Errorf("pprof: period_ns must be non-negative, got %d", periodNs)
@@ -318,8 +319,9 @@ func sampleValue(count uint64, periodNs int64) (uint64, error) {
 		return 0, nil
 	}
 	period := uint64(periodNs) //nolint:gosec // periodNs >= 0
-	if count > ^uint64(0)/period {
-		return 0, fmt.Errorf("pprof: sample value overflow: count %d × period %d", count, periodNs)
+	const maxInt64 = ^uint64(0) >> 1
+	if count > maxInt64/period {
+		return 0, fmt.Errorf("pprof: sample value overflow: count %d × period %d exceeds int64", count, periodNs)
 	}
 	return count * period, nil
 }

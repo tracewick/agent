@@ -50,6 +50,13 @@ type Config struct {
 	MetricsListen        string // optional host:port for Prometheus /metrics; empty disables
 	TLSCAFile            string // optional PEM CA bundle for HTTPS to Pyroscope
 	Once                 bool   // one drain pass then exit
+
+	// DeliveryLimits overlays delivery.DefaultLimits when > 0 (PHP builder / memory budgets).
+	MaxStacks           int
+	MaxFrames           int
+	MaxStrings          int
+	MaxHeldDecodedBytes int64
+	MaxInFlightBytes    int64
 }
 
 // Load parses argv flags and environment. Password is read only from TRACEWICK_PYROSCOPE_PASSWORD.
@@ -204,6 +211,86 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 				return Config{}, fmt.Errorf("config: invalid --max-rejected-files: %w", err)
 			}
 			cfg.MaxRejectedFiles = n
+		case strings.HasPrefix(arg, "--max-stacks="):
+			n, err := strconv.Atoi(strings.TrimPrefix(arg, "--max-stacks="))
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-stacks: %w", err)
+			}
+			cfg.MaxStacks = n
+		case arg == "--max-stacks":
+			v, err := needValue(args, &i, arg)
+			if err != nil {
+				return Config{}, err
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-stacks: %w", err)
+			}
+			cfg.MaxStacks = n
+		case strings.HasPrefix(arg, "--max-frames="):
+			n, err := strconv.Atoi(strings.TrimPrefix(arg, "--max-frames="))
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-frames: %w", err)
+			}
+			cfg.MaxFrames = n
+		case arg == "--max-frames":
+			v, err := needValue(args, &i, arg)
+			if err != nil {
+				return Config{}, err
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-frames: %w", err)
+			}
+			cfg.MaxFrames = n
+		case strings.HasPrefix(arg, "--max-strings="):
+			n, err := strconv.Atoi(strings.TrimPrefix(arg, "--max-strings="))
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-strings: %w", err)
+			}
+			cfg.MaxStrings = n
+		case arg == "--max-strings":
+			v, err := needValue(args, &i, arg)
+			if err != nil {
+				return Config{}, err
+			}
+			n, err := strconv.Atoi(v)
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-strings: %w", err)
+			}
+			cfg.MaxStrings = n
+		case strings.HasPrefix(arg, "--max-held-decoded-bytes="):
+			n, err := strconv.ParseInt(strings.TrimPrefix(arg, "--max-held-decoded-bytes="), 10, 64)
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-held-decoded-bytes: %w", err)
+			}
+			cfg.MaxHeldDecodedBytes = n
+		case arg == "--max-held-decoded-bytes":
+			v, err := needValue(args, &i, arg)
+			if err != nil {
+				return Config{}, err
+			}
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-held-decoded-bytes: %w", err)
+			}
+			cfg.MaxHeldDecodedBytes = n
+		case strings.HasPrefix(arg, "--max-in-flight-bytes="):
+			n, err := strconv.ParseInt(strings.TrimPrefix(arg, "--max-in-flight-bytes="), 10, 64)
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-in-flight-bytes: %w", err)
+			}
+			cfg.MaxInFlightBytes = n
+		case arg == "--max-in-flight-bytes":
+			v, err := needValue(args, &i, arg)
+			if err != nil {
+				return Config{}, err
+			}
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil {
+				return Config{}, fmt.Errorf("config: invalid --max-in-flight-bytes: %w", err)
+			}
+			cfg.MaxInFlightBytes = n
 		case strings.HasPrefix(arg, "--pyroscope-password="), arg == "--pyroscope-password":
 			return Config{}, errors.New("config: do not pass the Pyroscope password on the command line; set " + envPyroscopePassword)
 		default:
@@ -245,7 +332,37 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	if cfg.MaxRejectedFiles < 0 || cfg.MaxRejectedFiles > 100_000 {
 		return Config{}, errors.New("config: --max-rejected-files must be between 0 and 100000")
 	}
+	if cfg.MaxStacks < 0 || cfg.MaxFrames < 0 || cfg.MaxStrings < 0 {
+		return Config{}, errors.New("config: delivery limit overrides must be non-negative (0 keeps defaults)")
+	}
+	if cfg.MaxHeldDecodedBytes < 0 || cfg.MaxInFlightBytes < 0 {
+		return Config{}, errors.New("config: byte budget overrides must be non-negative (0 keeps defaults)")
+	}
 	return cfg, nil
+}
+
+// DeliveryLimits returns DefaultLimits with positive Config overrides applied.
+func (c *Config) DeliveryLimits() delivery.Limits {
+	l := delivery.DefaultLimits()
+	if c == nil {
+		return l
+	}
+	if c.MaxStacks > 0 {
+		l.MaxStacks = c.MaxStacks
+	}
+	if c.MaxFrames > 0 {
+		l.MaxFrames = c.MaxFrames
+	}
+	if c.MaxStrings > 0 {
+		l.MaxStrings = c.MaxStrings
+	}
+	if c.MaxHeldDecodedBytes > 0 {
+		l.MaxHeldDecodedBytes = c.MaxHeldDecodedBytes
+	}
+	if c.MaxInFlightBytes > 0 {
+		l.MaxInFlightBytes = c.MaxInFlightBytes
+	}
+	return l
 }
 
 // Usage returns the help text for the run command.
@@ -263,6 +380,11 @@ Options:
   --sleep=DURATION              idle poll delay (default: 5s)
   --shutdown-grace=DURATION     after SIGTERM stop new claims immediately; finish in-flight for DURATION (0=stop now; default: 30s)
   --max-rejected-files=N        keep up to N files under rejected/ (default: 100; 0 deletes)
+  --max-stacks=N                decode/merge stack cap (default: 4096; raise with PHP builder)
+  --max-frames=N                decode/merge frame cap (default: 16384)
+  --max-strings=N               decode/merge string cap (default: 32768)
+  --max-held-decoded-bytes=N    sum of estimated decoded profile bytes per pass (default: 64MiB)
+  --max-in-flight-bytes=N       sum of claimed spool bytes per pass / encoded push cap (default: 64MiB)
   --metrics-listen=ADDR         Prometheus /metrics bind (env TRACEWICK_METRICS_LISTEN; empty disables)
   --tls-ca=PATH                 extra PEM CA roots for HTTPS (env TRACEWICK_TLS_CA)
   --once                        deliver one pass and exit

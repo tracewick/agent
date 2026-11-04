@@ -120,6 +120,8 @@ func (g *CardinalityGate) purgeExpiredLocked(now time.Time) {
 			continue
 		}
 		delete(g.seen, hash)
+		g.store.Delete(seenPrefix + hash)
+		_ = g.store.Add(metaUnique, -1)
 	}
 }
 

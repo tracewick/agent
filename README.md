@@ -27,12 +27,13 @@ long-running `run` command; the binary is not production-ready yet.
   (at-least-once).
 - **Decode / merge limits** default to the PHP `BoundedProfileBuilder` defaults
   (`4096` stacks / `16384` frames / `32768` strings), plus one wire overflow
-  sentinel. If PHP raises those caps, raise the matching agent delivery limits
-  too — otherwise capped-but-valid profiles are rejected as over budget.
-- **Memory budgets** (`MaxDecodedBytes`, `MaxHeldDecodedBytes`,
-  `MaxInFlightBytes`, encode string/protobuf caps) bound agent allocations;
-  they are not a hard process RSS ceiling (encode still builds intermediate
-  buffers before the final blob).
+  sentinel. If PHP raises those caps, raise the agent with `--max-stacks` /
+  `--max-frames` / `--max-strings` (or the same fields on `config.Config`) —
+  otherwise capped-but-valid profiles are rejected as over budget.
+- **Memory budgets** (`MaxDecodedBytes`, `--max-held-decoded-bytes` as a
+  conservative `Profile.EstimatedBytes` sum, `--max-in-flight-bytes` as the
+  claimed-spool sum and encoded push cap) bound agent allocations; they are not
+  a hard process RSS ceiling (encode still builds intermediate buffers).
 
 ## Develop
 

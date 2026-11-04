@@ -54,7 +54,7 @@ func New(cfg *config.Config, log *slog.Logger, httpClient *http.Client, registry
 	if err != nil {
 		return nil, err
 	}
-	limits := delivery.DefaultLimits()
+	limits := cfg.DeliveryLimits()
 	if vErr := limits.Validate(); vErr != nil {
 		return nil, vErr
 	}

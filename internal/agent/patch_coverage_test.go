@@ -266,7 +266,7 @@ func TestDrainHeldBudgetAndEmptyPushGroup(t *testing.T) {
 		t.Fatalf("empty pushGroup: %#v", dec)
 	}
 
-	// MaxHeldDecodedBytes: second file released when held byte budget is 1 byte under two files.
+	// MaxHeldDecodedBytes uses Profile.EstimatedBytes; one profile fits, second triggers More.
 	dir3 := t.TempDir()
 	for _, name := range []string{
 		"00000000000000000001-aaaaaaaaaaaaaaaa.spool",
@@ -280,13 +280,79 @@ func TestDrainHeldBudgetAndEmptyPushGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	file3, parseErr := spool.Parse(body)
+	if parseErr != nil {
+		t.Fatal(parseErr)
+	}
+	prof3, decErr := pprof.FromSpoolFile(file3)
+	if decErr != nil {
+		t.Fatal(decErr)
+	}
 	a.drainer.Source = src3
 	a.drainer.Limits.MaxHeldProfiles = 256
-	a.drainer.Limits.MaxHeldDecodedBytes = int64(len(body)) // exactly one file
+	a.drainer.Limits.MaxHeldDecodedBytes = prof3.EstimatedBytes() // exactly one decoded profile
 	res = a.drainer.Drain(context.Background(), context.Background())
-	if res.Delivered != 1 {
+	if res.Delivered != 1 || res.Outcome != OutcomeMore {
 		t.Fatalf("held decoded bytes budget: %#v", res)
 	}
+
+	// Single profile over held decoded budget → reject (no hot loop).
+	dir4 := t.TempDir()
+	if wErr := os.WriteFile(filepath.Join(dir4, "00000000000000000001-aaaaaaaaaaaaaaaa.spool"), body, 0o600); wErr != nil { //nolint:gosec // temp
+		t.Fatal(wErr)
+	}
+	src4, err := spool.NewSource(spool.Config{Directory: dir4, ReaderID: "held-one", MaxRejectedFiles: 100})
+	if err != nil {
+		t.Fatal(err)
+	}
+	a.drainer.Source = src4
+	a.drainer.Limits.MaxHeldDecodedBytes = 1
+	res = a.drainer.Drain(context.Background(), context.Background())
+	if res.Rejected < 1 || res.Delivered != 0 {
+		t.Fatalf("single over held budget: %#v", res)
+	}
+}
+
+func TestClaimBatchRespectsInFlightSum(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	body, err := os.ReadFile(filepath.Join("..", "..", "testdata", "spool", "v2", "web-request.spool"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{
+		"00000000000000000001-aaaaaaaaaaaaaaaa.spool",
+		"00000000000000000002-aaaaaaaaaaaaaaaa.spool",
+	} {
+		if wErr := os.WriteFile(filepath.Join(dir, name), body, 0o600); wErr != nil { //nolint:gosec // temp
+			t.Fatal(wErr)
+		}
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.Copy(io.Discard, r.Body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(srv.Close)
+	cfg := config.Config{
+		SpoolDir: dir, PyroscopeURL: srv.URL, ReaderID: "inflight-sum",
+		AggregationWindowSec: 15, StaleClaim: 10 * time.Minute, OwnershipMargin: time.Minute,
+		MaxFilesPerPass: 8, MaxBatchInputBytes: 8 << 20, HTTPTimeout: time.Second, MaxCardinality: 256,
+	}
+	a, err := New(&cfg, nil, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Each file fits alone; sum of two exceeds MaxInFlightBytes → only one claimed this pass.
+	a.drainer.Limits.MaxInFlightBytes = int64(len(body)) + int64(len(body))/2
+	a.drainer.MaxBatchInputBytes = 8 << 20
+	batch, hit, _, claimErr := a.drainer.claimBatch(context.Background(), 8, a.drainer.MaxBatchInputBytes)
+	if claimErr != nil {
+		t.Fatal(claimErr)
+	}
+	if len(batch) != 1 || !hit {
+		t.Fatalf("want one claim + hitBudget, got n=%d hit=%v", len(batch), hit)
+	}
+	a.drainer.releaseAll(batch)
 }
 
 func TestPushGroupInFlightAndOwnershipBeforePost(t *testing.T) {

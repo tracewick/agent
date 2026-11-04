@@ -67,7 +67,8 @@ func TestCardinalityRejectsInvalidMaxAndDefaultsStore(t *testing.T) {
 
 func TestCardinalityTTLFreesSlots(t *testing.T) {
 	t.Parallel()
-	gate, err := aggregate.NewCardinalityGate(aggregate.NewMemoryStore(), 1)
+	store := aggregate.NewMemoryStore()
+	gate, err := aggregate.NewCardinalityGate(store, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,6 +84,40 @@ func TestCardinalityTTLFreesSlots(t *testing.T) {
 	now = now.Add(2 * time.Minute) // expire "a"
 	third := gate.LimitLabels("blog", map[string]string{"route": "b"}, spool.EventWall, 10)
 	assertLabels(t, third, map[string]string{"route": "b"})
+}
+
+func TestCardinalityTTLPurgesDiagnosticStore(t *testing.T) {
+	t.Parallel()
+	store := aggregate.NewMemoryStore()
+	const maxKeys = 4
+	gate, err := aggregate.NewCardinalityGate(store, maxKeys)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate.SetTTL(time.Minute)
+	now := time.Unix(1_000, 0)
+	gate.SetNow(func() time.Time { return now })
+
+	peak := 0
+	for cycle := 0; cycle < 8; cycle++ {
+		for i := 0; i < maxKeys; i++ {
+			route := string(rune('a'+cycle)) + string(rune('0'+i))
+			_ = gate.LimitLabels("blog", map[string]string{"route": route}, spool.EventWall, 10)
+		}
+		if n := store.Len(); n > peak {
+			peak = n
+		}
+		now = now.Add(2 * time.Minute) // expire the batch before next cycle admits
+	}
+	// Trigger a final purge + one admit so expired keys are gone.
+	_ = gate.LimitLabels("blog", map[string]string{"route": "final"}, spool.EventWall, 10)
+	// After many TTL cycles, store must stay O(maxKeys), not accumulate history.
+	if store.Len() > maxKeys+2 { // active seen keys + metaUnique
+		t.Fatalf("diagnostic store grew unbounded: len=%d peak=%d", store.Len(), peak)
+	}
+	if peak > maxKeys+2 {
+		t.Fatalf("peak store size %d exceeds bound", peak)
+	}
 }
 
 func TestCardinalityNilSetters(t *testing.T) {

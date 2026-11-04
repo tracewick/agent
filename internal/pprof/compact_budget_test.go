@@ -1,6 +1,7 @@
 package pprof_test
 
 import (
+	"strconv"
 	"testing"
 
 	"github.com/tracewick/agent/internal/pprof"
@@ -46,11 +47,11 @@ func TestDecodeCompactAppliesDefaultLimitsWhenZero(t *testing.T) {
 
 func TestDecodeCompactRejectsTooManyStacks(t *testing.T) {
 	t.Parallel()
-	// schema=1, 0 strings, stackCount=3 with MaxStacks=2
+	// MaxStacks=2 allows wire budget 3 (regular + overflow). Four stacks must fail.
 	payload := []byte{1}
 	payload = appendU32Be(payload, 0) // strings
-	payload = appendU32Be(payload, 3) // stacks
-	for i := 0; i < 3; i++ {
+	payload = appendU32Be(payload, 4) // stacks
+	for i := 0; i < 4; i++ {
 		payload = appendU32Be(payload, 1) // weight
 		payload = append(payload, 0)      // flags
 		payload = appendU32Be(payload, 0) // frameCount
@@ -60,6 +61,110 @@ func TestDecodeCompactRejectsTooManyStacks(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected max stacks")
+	}
+}
+
+func TestDecodeCompactAcceptsPHPOverflowStack(t *testing.T) {
+	t.Parallel()
+	// PHP BoundedProfileBuilder: MaxStacks regular stacks + 1 [overflow] sentinel.
+	const maxStacks = 8
+	b, err := pprof.NewBoundedBuilder(maxStacks, 64, 64)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < maxStacks+5; i++ {
+		fn := "fn-" + strconv.Itoa(i)
+		b.Add([]pprof.Frame{{Function: &fn}}, 3, false)
+	}
+	if !b.WasCapped() || b.OverflowWeight() == 0 {
+		t.Fatalf("expected overflow weight, capped=%v overflow=%d", b.WasCapped(), b.OverflowWeight())
+	}
+	frames, stacks := b.Parts()
+	if len(stacks) != maxStacks+1 {
+		t.Fatalf("parts stacks = %d want %d", len(stacks), maxStacks+1)
+	}
+	payload, err := pprof.EncodeCompactStacks(frames, stacks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gotFrames, gotStacks, err := pprof.DecodeCompactStacksLimited(payload, pprof.DecodeLimits{
+		MaxStacks: maxStacks, MaxFrames: 64, MaxStrings: 64,
+	})
+	if err != nil {
+		t.Fatalf("PHP overflow profile must decode: %v", err)
+	}
+	var in, out uint64
+	for _, s := range stacks {
+		in += uint64(s.Count)
+	}
+	for _, s := range gotStacks {
+		out += uint64(s.Count)
+	}
+	if in != out || len(gotFrames) == 0 {
+		t.Fatalf("weight in=%d out=%d frames=%d", in, out, len(gotFrames))
+	}
+}
+
+func TestWireStackBudgetDefault(t *testing.T) {
+	t.Parallel()
+	if got := pprof.WireStackBudget(pprof.DecodeLimits{}); got != pprof.DefaultMaxStacks+pprof.MaxOverflowStacks {
+		t.Fatalf("got %d", got)
+	}
+}
+
+func TestDecodeCompactRejectsFrameRefsAndUniqueFrames(t *testing.T) {
+	t.Parallel()
+	// Three stacks with distinct lines; MaxFrames=2 rejects the third unique frame.
+	payload := []byte{1}
+	payload = appendU32Be(payload, 0) // no strings
+	payload = appendU32Be(payload, 3)
+	for _, line := range []uint32{1, 2, 3} {
+		payload = appendU32Be(payload, 1)
+		payload = append(payload, 0)
+		payload = appendU32Be(payload, 1)
+		payload = appendU32Be(payload, 0xffffffff, 0xffffffff, 0xffffffff, line, 0xffffffff)
+	}
+	_, _, err := pprof.DecodeCompactStacksLimited(payload, pprof.DecodeLimits{
+		MaxStacks: 10, MaxFrames: 2, MaxStrings: 10, MaxFrameRefs: 100,
+	})
+	if err == nil {
+		t.Fatal("expected unique frames limit")
+	}
+
+	// Frame refs: MaxFrameRefs=1, one stack with 2 frame slots
+	payload2 := []byte{1}
+	payload2 = appendU32Be(payload2, 0)
+	payload2 = appendU32Be(payload2, 1)
+	payload2 = appendU32Be(payload2, 1)
+	payload2 = append(payload2, 0)
+	payload2 = appendU32Be(payload2, 2)
+	for line := uint32(1); line <= 2; line++ {
+		payload2 = appendU32Be(payload2, 0xffffffff, 0xffffffff, 0xffffffff, line, 0xffffffff)
+	}
+	_, _, err = pprof.DecodeCompactStacksLimited(payload2, pprof.DecodeLimits{
+		MaxStacks: 10, MaxFrames: 10, MaxStrings: 10, MaxFrameRefs: 1,
+	})
+	if err == nil {
+		t.Fatal("expected frame refs limit")
+	}
+}
+
+func TestDecodeCompactRejectsHugeStringBytes(t *testing.T) {
+	t.Parallel()
+	big := make([]byte, 100)
+	for i := range big {
+		big[i] = 'x'
+	}
+	payload := []byte{1}
+	payload = appendU32Be(payload, 1)
+	payload = appendU32Be(payload, uint32(len(big))) //nolint:gosec // test
+	payload = append(payload, big...)
+	payload = appendU32Be(payload, 0) // stacks
+	_, _, err := pprof.DecodeCompactStacksLimited(payload, pprof.DecodeLimits{
+		MaxStacks: 10, MaxFrames: 10, MaxStrings: 10, MaxStringBytes: 50,
+	})
+	if err == nil {
+		t.Fatal("expected string byte budget")
 	}
 }
 

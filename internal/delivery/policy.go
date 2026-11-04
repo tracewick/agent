@@ -117,12 +117,9 @@ func isTransientNet(err error) bool {
 }
 
 // Backoff returns how long to wait before the next retry.
-// attempt is 0-based. When hint (Retry-After) is positive it wins over exponential backoff.
+// attempt is 0-based. Exponential backoff (optionally jittered) is computed first;
+// a positive hint (Retry-After) is a lower bound and is not clipped by maxDelay.
 func Backoff(attempt int, hint, base, maxDelay time.Duration, rng *rand.Rand) time.Duration {
-	if hint > 0 {
-		// Honor Retry-After from the backend; do not clip it to local maxDelay.
-		return hint
-	}
 	if base <= 0 {
 		base = time.Second
 	}
@@ -141,9 +138,12 @@ func Backoff(attempt int, hint, base, maxDelay time.Duration, rng *rand.Rand) ti
 	if d > maxDelay || d <= 0 {
 		d = maxDelay
 	}
-	if rng == nil {
-		return d
+	if rng != nil {
+		// Full jitter in [0, d] desynchronizes fleets; Retry-After still floors below.
+		d = time.Duration(rng.Int63n(int64(d) + 1))
 	}
-	// Full jitter in [0, d]; d is positive after clamping to maxDelay.
-	return time.Duration(rng.Int63n(int64(d) + 1))
+	if hint > d {
+		return hint
+	}
+	return d
 }

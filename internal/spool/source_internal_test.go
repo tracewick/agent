@@ -5,6 +5,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -151,10 +152,48 @@ func TestScanReadDirFailureAndDefaults(t *testing.T) {
 	}
 	files2, scanErr2 := src2.scan()
 	if scanErr2 != nil || len(files2) != 0 {
-		t.Fatalf("nested shard readdir fail should be ignored: files=%v err=%v", files2, scanErr2)
+		t.Fatalf("nested shard readdir fail should not abort scan: files=%v err=%v", files2, scanErr2)
+	}
+	issues := src2.TakeScanIssues()
+	if len(issues) != 1 || !strings.Contains(issues[0], "shard boom") {
+		t.Fatalf("expected scan issue for EACCES-like shard error, got %v", issues)
 	}
 	if calls < 2 {
 		t.Fatalf("expected root+shard ReadDir, calls=%d", calls)
+	}
+	src2.noteScanIssue("ab", errors.New("x"))
+	src2.noteScanIssue("ab", errors.New("x"))
+	if got := src2.TakeScanIssues(); len(got) != 1 {
+		t.Fatalf("dedupe noteScanIssue: %v", got)
+	}
+
+	// ENOENT on nested shard is benign (no issue recorded).
+	src3, err3 := NewSource(Config{Directory: t.TempDir(), ReaderID: "reader-b"})
+	if err3 != nil {
+		t.Fatal(err3)
+	}
+	missing := filepath.Join(src3.cfg.Directory, "cd")
+	osReadDir = func(path string) ([]os.DirEntry, error) {
+		if path == missing || filepath.Base(path) == "cd" {
+			return nil, fs.ErrNotExist
+		}
+		return os.ReadDir(path)
+	}
+	// create shard dir entry via real mkdir then fail read
+	if mkdirErr := os.Mkdir(missing, 0o700); mkdirErr != nil { //nolint:gosec // temp
+		t.Fatal(mkdirErr)
+	}
+	osReadDir = func(path string) ([]os.DirEntry, error) {
+		if path == missing {
+			return nil, fs.ErrNotExist
+		}
+		return os.ReadDir(path)
+	}
+	if _, scanErr3 := src3.scan(); scanErr3 != nil {
+		t.Fatal(scanErr3)
+	}
+	if issues := src3.TakeScanIssues(); len(issues) != 0 {
+		t.Fatalf("ENOENT must be silent, got %v", issues)
 	}
 
 	osStat = func(string) (os.FileInfo, error) { return nil, errors.New("stat boom") }

@@ -7,6 +7,16 @@ import (
 	"github.com/tracewick/agent/internal/delivery"
 )
 
+func TestDecodeLimitsMapping(t *testing.T) {
+	t.Parallel()
+	l := delivery.DefaultLimits()
+	d := l.DecodeLimits()
+	if d.MaxStacks != l.MaxStacks || d.MaxFrames != l.MaxFrames || d.MaxStrings != l.MaxStrings ||
+		d.MaxStringBytes != l.MaxStringBytes || d.MaxFrameRefs != l.MaxFrameRefs {
+		t.Fatalf("%#v vs %#v", d, l)
+	}
+}
+
 func TestDefaultLimitsValidate(t *testing.T) {
 	t.Parallel()
 	l := delivery.DefaultLimits()
@@ -36,6 +46,7 @@ func TestLimitsValidationFailures(t *testing.T) {
 		func() delivery.Limits { l := base; l.MaxStrings = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxStrings = 1_000_001; return l }(),
 		func() delivery.Limits { l := base; l.MaxStringBytes = 0; return l }(),
+		func() delivery.Limits { l := base; l.MaxFrameRefs = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxHeldProfiles = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxAggregatedPprofBytes = 0; return l }(),
 		func() delivery.Limits { l := base; l.MaxInFlightBytes = 0; return l }(),

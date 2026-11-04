@@ -12,7 +12,8 @@ const (
 	DefaultMaxHeldProfiles    = 256
 	DefaultMaxAggregatedPprof = 16 << 20
 	DefaultMaxInFlightBytes   = 64 << 20
-	DefaultMaxStringBytes     = 1 << 20
+	DefaultMaxStringBytes     = pprof.DefaultMaxStringBytes
+	DefaultMaxFrameRefs       = pprof.DefaultMaxFrameRefs
 	minPositive               = 1
 )
 
@@ -23,6 +24,7 @@ type Limits struct {
 	MaxFrames               int
 	MaxStrings              int
 	MaxStringBytes          int
+	MaxFrameRefs            int
 	MaxHeldProfiles         int
 	MaxAggregatedPprofBytes int64
 	MaxInFlightBytes        int64
@@ -36,9 +38,22 @@ func DefaultLimits() Limits {
 		MaxFrames:               pprof.DefaultMaxFrames,
 		MaxStrings:              pprof.DefaultMaxStrings,
 		MaxStringBytes:          DefaultMaxStringBytes,
+		MaxFrameRefs:            DefaultMaxFrameRefs,
 		MaxHeldProfiles:         DefaultMaxHeldProfiles,
 		MaxAggregatedPprofBytes: DefaultMaxAggregatedPprof,
 		MaxInFlightBytes:        DefaultMaxInFlightBytes,
+	}
+}
+
+// DecodeLimits maps delivery caps onto compact-stacks decode budgets (wire may
+// include one overflow stack beyond MaxStacks).
+func (l Limits) DecodeLimits() pprof.DecodeLimits {
+	return pprof.DecodeLimits{
+		MaxStacks:      l.MaxStacks,
+		MaxFrames:      l.MaxFrames,
+		MaxStrings:     l.MaxStrings,
+		MaxStringBytes: l.MaxStringBytes,
+		MaxFrameRefs:   l.MaxFrameRefs,
 	}
 }
 
@@ -58,6 +73,9 @@ func (l Limits) Validate() error {
 	}
 	if l.MaxStringBytes < minPositive {
 		return fmt.Errorf("delivery: max string bytes must be >= %d", minPositive)
+	}
+	if l.MaxFrameRefs < minPositive {
+		return fmt.Errorf("delivery: max frame refs must be >= %d", minPositive)
 	}
 	if l.MaxHeldProfiles < minPositive {
 		return fmt.Errorf("delivery: max held profiles must be >= %d", minPositive)

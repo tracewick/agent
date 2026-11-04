@@ -17,15 +17,23 @@ const (
 	maxStringsCap     = 1_000_000
 )
 
+// frameMapKey identifies a frame without concatenating string bodies into the map key
+// (hostile long function/file names must not explode merge memory).
+type frameMapKey struct {
+	fn, class, file *string
+	line, closure   uint32
+	hasClosure      bool
+}
+
 // BoundedBuilder builds frames/stacks with transactional admission (BoundedProfileBuilder).
 type BoundedBuilder struct {
 	maxStacks  int
 	maxFrames  int
 	maxStrings int
 
-	frameIDs   map[string]int
+	frameIDs   map[frameMapKey]int
 	frames     []Frame
-	strings    map[string]struct{}
+	interned   map[string]*string // unique non-empty strings → stable pointer
 	stacks     map[string]stackEntry
 	stackOrder []string
 
@@ -62,8 +70,8 @@ func NewBoundedBuilder(maxStacks, maxFrames, maxStrings int) (*BoundedBuilder, e
 		maxStacks:  maxStacks,
 		maxFrames:  maxFrames,
 		maxStrings: maxStrings,
-		frameIDs:   map[string]int{},
-		strings:    map[string]struct{}{},
+		frameIDs:   map[frameMapKey]int{},
+		interned:   map[string]*string{},
 		stacks:     map[string]stackEntry{},
 	}, nil
 }
@@ -75,19 +83,50 @@ func (b *BoundedBuilder) Add(frames []Frame, weight uint32, truncated bool) {
 	}
 	b.inWeight += uint64(weight)
 
+	// Pending interns are discarded if this stack overflows — do not grow b.interned early.
+	pendingIntern := map[string]*string{}
+	intern := func(s *string) *string {
+		if s == nil || *s == "" {
+			return nil
+		}
+		if p, ok := b.interned[*s]; ok {
+			return p
+		}
+		if p, ok := pendingIntern[*s]; ok {
+			return p
+		}
+		cp := *s
+		pendingIntern[cp] = &cp
+		return &cp
+	}
+	makeKey := func(f Frame) (frameMapKey, Frame) {
+		k := frameMapKey{
+			fn:    intern(f.Function),
+			class: intern(f.Class),
+			file:  intern(f.File),
+			line:  f.Line,
+		}
+		canon := Frame{Function: k.fn, Class: k.class, File: k.file, Line: f.Line}
+		if f.ClosureLine != nil {
+			k.hasClosure = true
+			k.closure = *f.ClosureLine
+			canon.ClosureLine = f.ClosureLine
+		}
+		return k, canon
+	}
+
 	type pendingFrame struct {
-		key   string
+		key   frameMapKey
 		id    int
 		frame Frame
 	}
 	var pending []pendingFrame
-	pendingByKey := map[string]int{}
-	pendingStrings := map[string]struct{}{}
+	pendingByKey := map[frameMapKey]int{}
 	ids := make([]int, 0, len(frames))
 	nextID := len(b.frames)
 
 	for _, frame := range frames {
-		fk := frame.key()
+		fk, canon := makeKey(frame)
 		if id, ok := b.frameIDs[fk]; ok {
 			ids = append(ids, id)
 			continue
@@ -97,21 +136,9 @@ func (b *BoundedBuilder) Add(frames []Frame, weight uint32, truncated bool) {
 			continue
 		}
 		pendingByKey[fk] = len(pending)
-		pending = append(pending, pendingFrame{key: fk, id: nextID, frame: frame})
+		pending = append(pending, pendingFrame{key: fk, id: nextID, frame: canon})
 		ids = append(ids, nextID)
 		nextID++
-		for _, s := range []*string{frame.Function, frame.Class, frame.File} {
-			if s == nil || *s == "" {
-				continue
-			}
-			if _, ok := b.strings[*s]; ok {
-				continue
-			}
-			if _, ok := pendingStrings[*s]; ok {
-				continue
-			}
-			pendingStrings[*s] = struct{}{}
-		}
 	}
 
 	stackKey := joinIDs(ids)
@@ -126,17 +153,17 @@ func (b *BoundedBuilder) Add(frames []Frame, weight uint32, truncated bool) {
 	}
 	if len(b.stacks)+1 > b.maxStacks ||
 		len(b.frames)+len(pending) > b.maxFrames ||
-		len(b.strings)+len(pendingStrings) > b.maxStrings {
+		len(b.interned)+len(pendingIntern) > b.maxStrings {
 		b.capped = true
 		b.overflowWeight += uint64(weight)
 		return
 	}
+	for s, p := range pendingIntern {
+		b.interned[s] = p
+	}
 	for _, p := range pending {
 		b.frameIDs[p.key] = len(b.frames)
 		b.frames = append(b.frames, p.frame)
-	}
-	for s := range pendingStrings {
-		b.strings[s] = struct{}{}
 	}
 	b.stacks[stackKey] = stackEntry{ids: ids, count: uint64(weight), truncated: truncated}
 	b.stackOrder = append(b.stackOrder, stackKey)
@@ -189,7 +216,7 @@ func (b *BoundedBuilder) UniqueStackCount() int {
 func (b *BoundedBuilder) FrameCount() int { return len(b.frames) }
 
 // StringCount is committed unique non-empty frame strings.
-func (b *BoundedBuilder) StringCount() int { return len(b.strings) }
+func (b *BoundedBuilder) StringCount() int { return len(b.interned) }
 
 func u32sat(v uint64) uint32 {
 	if v > uint64(^uint32(0)) {

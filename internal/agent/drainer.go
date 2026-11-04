@@ -109,10 +109,16 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 	type item struct {
 		claimed *spool.Claimed
 		file    *spool.File
+		profile *pprof.Profile
 	}
 	items := make([]item, 0, len(batch))
 	members := make([]aggregate.Member, 0, len(batch))
 	rejected := 0
+	decodeLim := d.Limits.DecodeLimits()
+	maxHeld := d.Limits.MaxHeldProfiles
+	if maxHeld <= 0 {
+		maxHeld = delivery.DefaultMaxHeldProfiles
+	}
 
 	for _, claimed := range batch {
 		if d.Ownership.Exhausted(claimed.ClaimedAt, d.Now()) {
@@ -136,12 +142,13 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 			d.Log.Warn("reject unreadable spool", "file", claimed.Name, "err", parseErr)
 			continue
 		}
-		// Decode compact-stacks now so a corrupt payload cannot poison the whole group later.
-		if _, decErr := pprof.FromSpoolFileLimited(file, pprof.DecodeLimits{
-			MaxStacks:  d.Limits.MaxStacks,
-			MaxFrames:  d.Limits.MaxFrames,
-			MaxStrings: d.Limits.MaxStrings,
-		}); decErr != nil {
+		// Decode once: isolate corrupt members and reuse Profile in pushGroup.
+		if len(items) >= maxHeld {
+			d.Log.Warn("held profile budget reached; remaining claims released", "max", maxHeld)
+			break
+		}
+		profile, decErr := pprof.FromSpoolFileLimited(file, decodeLim)
+		if decErr != nil {
 			_ = d.Source.Reject(claimed)
 			held = withoutClaim(held, claimed)
 			rejected++
@@ -167,7 +174,7 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 			d.Log.Warn("reject name hint / header hash mismatch", "file", claimed.Name, "hint", hint, "header", key.Hash())
 			continue
 		}
-		items = append(items, item{claimed: claimed, file: file})
+		items = append(items, item{claimed: claimed, file: file, profile: profile})
 		members = append(members, aggregate.Member{File: file, Name: claimed.Name, HintHash: hint})
 	}
 
@@ -184,18 +191,20 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 		return Result{Outcome: OutcomeFailed, Rejected: rejected, Failure: err.Error()}
 	}
 
-	byFile := make(map[*spool.File]*spool.Claimed, len(items))
+	byFile := make(map[*spool.File]item, len(items))
 	for _, it := range items {
-		byFile[it.file] = it.claimed
+		byFile[it.file] = it
 	}
 
 	delivered := 0
 	posts := 0
 	for _, g := range groups {
 		claimedFiles := make([]*spool.Claimed, 0, len(g.Files))
+		profiles := make([]*pprof.Profile, 0, len(g.Files))
 		for _, f := range g.Files {
-			if c := byFile[f]; c != nil {
-				claimedFiles = append(claimedFiles, c)
+			if it, ok := byFile[f]; ok {
+				claimedFiles = append(claimedFiles, it.claimed)
+				profiles = append(profiles, it.profile)
 			}
 		}
 		if len(claimedFiles) == 0 {
@@ -209,7 +218,7 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 			}
 		}
 
-		decision := d.pushGroup(pushCtx, &g)
+		decision := d.pushGroup(pushCtx, &g, profiles)
 		posts++
 		switch decision.Action {
 		case delivery.ActionAck:
@@ -284,21 +293,9 @@ func (d *Drainer) setAggRatio(profiles, posts int) {
 	d.Metrics.SetAggregationRatio(float64(profiles) / float64(posts))
 }
 
-func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group) delivery.Decision {
-	profiles := make([]*pprof.Profile, 0, len(g.Files))
-	lim := pprof.DecodeLimits{
-		MaxStacks:  d.Limits.MaxStacks,
-		MaxFrames:  d.Limits.MaxFrames,
-		MaxStrings: d.Limits.MaxStrings,
-	}
-	for _, f := range g.Files {
-		// Already validated in Drain; re-decode for merge (bounded).
-		p, err := pprof.FromSpoolFileLimited(f, lim)
-		if err != nil {
-			// Should not happen after pre-check; treat as reject of this push attempt's batch.
-			return delivery.Decision{Action: delivery.ActionReject, Reason: err.Error()}
-		}
-		profiles = append(profiles, p)
+func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group, profiles []*pprof.Profile) delivery.Decision {
+	if len(profiles) == 0 {
+		return delivery.Decision{Action: delivery.ActionReject, Reason: "empty profile group"}
 	}
 	merged, err := (pprof.Merger{
 		MaxStacks:  d.Limits.MaxStacks,

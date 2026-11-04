@@ -67,8 +67,12 @@ func TestDrainer413ShrinkMulti(t *testing.T) {
 	d := testDrainer(t, dir, srv.URL, nil)
 	before := d.MaxBatchInputBytes
 	res := d.Drain(context.Background(), context.Background())
-	if res.Outcome != OutcomeFailed || d.MaxBatchInputBytes >= before {
-		t.Fatalf("%#v bytes=%d", res, d.MaxBatchInputBytes)
+	// Always-413: group is bisected down to singles and rejected; configured batch budget stays.
+	if d.MaxBatchInputBytes != before {
+		t.Fatalf("413 must not permanently shrink MaxBatchInputBytes: before=%d after=%d", before, d.MaxBatchInputBytes)
+	}
+	if res.Rejected < 1 {
+		t.Fatalf("expected rejects after bisect-to-single, got %#v", res)
 	}
 }
 

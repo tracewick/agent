@@ -3,6 +3,7 @@ package aggregate_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/tracewick/agent/internal/aggregate"
 	"github.com/tracewick/agent/internal/spool"
@@ -61,6 +62,46 @@ func TestCardinalityRejectsInvalidMaxAndDefaultsStore(t *testing.T) {
 	got := gate.LimitLabels("a", nil, spool.EventCPU, 1)
 	if got == nil {
 		t.Fatal("expected empty map")
+	}
+}
+
+func TestCardinalityTTLFreesSlots(t *testing.T) {
+	t.Parallel()
+	gate, err := aggregate.NewCardinalityGate(aggregate.NewMemoryStore(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gate.SetTTL(time.Minute)
+	now := time.Unix(1_000, 0)
+	gate.SetNow(func() time.Time { return now })
+
+	first := gate.LimitLabels("blog", map[string]string{"route": "a"}, spool.EventWall, 10)
+	assertLabels(t, first, map[string]string{"route": "a"})
+	second := gate.LimitLabels("blog", map[string]string{"route": "b"}, spool.EventWall, 10)
+	assertLabels(t, second, map[string]string{"cardinality": "other"})
+
+	now = now.Add(2 * time.Minute) // expire "a"
+	third := gate.LimitLabels("blog", map[string]string{"route": "b"}, spool.EventWall, 10)
+	assertLabels(t, third, map[string]string{"route": "b"})
+}
+
+func TestCardinalityAdmitSerialized(t *testing.T) {
+	t.Parallel()
+	gate, err := aggregate.NewCardinalityGate(aggregate.NewMemoryStore(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h1 := aggregate.Hash("app", map[string]string{"r": "1"}, spool.EventCPU, 1)
+	h2 := aggregate.Hash("app", map[string]string{"r": "2"}, spool.EventCPU, 1)
+	h3 := aggregate.Hash("app", map[string]string{"r": "3"}, spool.EventCPU, 1)
+	if gate.Admit(h1) || gate.Admit(h2) {
+		t.Fatal("first two must fit")
+	}
+	if !gate.Admit(h3) {
+		t.Fatal("third must overflow")
+	}
+	if gate.Admit(h1) {
+		t.Fatal("known key must not overflow")
 	}
 }
 

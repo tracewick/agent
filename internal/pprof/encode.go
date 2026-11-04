@@ -185,10 +185,12 @@ func EncodeLimited(p *Profile, lim EncodeLimits) ([]byte, error) {
 			if nameLen > lim.MaxNameBytes {
 				return nil, fmt.Errorf("%w: derived name length %d exceeds %d", ErrEncodeBudget, nameLen, lim.MaxNameBytes)
 			}
-			if strings.remaining() < nameLen {
-				return nil, fmt.Errorf("%w: derived name needs %d string bytes; %d remain", ErrEncodeBudget, nameLen, strings.remaining())
-			}
+			// Materialize within MaxNameBytes; string-table budget is enforced only
+			// when index() inserts a *new* unique entry (reuse costs zero bytes).
 			name := frame.Name()
+			if len(name) > lim.MaxNameBytes {
+				return nil, fmt.Errorf("%w: function name length %d exceeds %d", ErrEncodeBudget, len(name), lim.MaxNameBytes)
+			}
 			id, locErr := locForFrame(frameID, name, frame.File, frame.Line, startLine(frame))
 			if locErr != nil {
 				return nil, locErr

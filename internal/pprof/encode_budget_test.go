@@ -200,4 +200,41 @@ func TestEncodeLimitedRejectsWhenStringBudgetExhaustedBeforeName(t *testing.T) {
 	}
 }
 
+func TestEncodeLimitedReusedFrameIDAtFullStringBudget(t *testing.T) {
+	t.Parallel()
+	// wall(4)+nanoseconds(11)+foo(3)=18. Second reference to the same frame adds 0 bytes.
+	fn := "foo"
+	p := &pprof.Profile{
+		EventType: spool.EventWall, PeriodNs: 1, StartNs: 1, EndNs: 2,
+		Frames: []pprof.Frame{{Function: &fn}},
+		Stacks: []pprof.Stack{{FrameIDs: []int{0, 0}, Count: 1}},
+	}
+	got, err := pprof.EncodeLimited(p, pprof.EncodeLimits{
+		MaxStringBytes: 18, MaxEncodedBytes: 1 << 20, MaxNameBytes: 64,
+	})
+	if err != nil || len(got) == 0 {
+		t.Fatalf("reused frameID must encode at full string budget: %v", err)
+	}
+}
+
+func TestEncodeLimitedSharedNameAcrossFramesAtFullStringBudget(t *testing.T) {
+	t.Parallel()
+	// Two frames, same function name, different lines → one string-table entry for the name.
+	fn := "foo"
+	p := &pprof.Profile{
+		EventType: spool.EventWall, PeriodNs: 1, StartNs: 1, EndNs: 2,
+		Frames: []pprof.Frame{
+			{Function: &fn, Line: 1},
+			{Function: &fn, Line: 2},
+		},
+		Stacks: []pprof.Stack{{FrameIDs: []int{0, 1}, Count: 1}},
+	}
+	got, err := pprof.EncodeLimited(p, pprof.EncodeLimits{
+		MaxStringBytes: 18, MaxEncodedBytes: 1 << 20, MaxNameBytes: 64,
+	})
+	if err != nil || len(got) == 0 {
+		t.Fatalf("shared name must not re-charge string budget: %v", err)
+	}
+}
+
 func strPtr(s string) *string { return &s }

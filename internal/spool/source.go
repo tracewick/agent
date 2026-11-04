@@ -92,6 +92,15 @@ func NewSource(cfg Config) (*Source, error) {
 	return &Source{cfg: cfg}, nil
 }
 
+// QueueLen is the number of unscanned-claim names still buffered after the last scan.
+// It is a cheap backlog hint for metrics; it undercounts files not yet listed.
+func (s *Source) QueueLen() int {
+	if s == nil {
+		return 0
+	}
+	return len(s.queue)
+}
+
 // Claim takes the next available spool file, oldest name first.
 // A non-nil error means the spool directory itself is unusable (missing, EACCES, …),
 // not “empty queue”.

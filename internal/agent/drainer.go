@@ -219,63 +219,20 @@ func (d *Drainer) Drain(admitCtx, pushCtx context.Context) Result {
 			}
 		}
 
-		decision := d.pushGroup(pushCtx, &g, profiles)
-		posts++
-		switch decision.Action {
-		case delivery.ActionAck:
-			for _, c := range claimedFiles {
-				if err := d.Source.Acknowledge(c); err != nil {
-					d.Log.Error("ack failed", "file", c.Name, "err", err)
-				}
-				held = withoutClaim(held, c)
-				delivered++
-			}
-			d.Metrics.AddDelivered(int64(len(claimedFiles)))
-		case delivery.ActionReject:
-			for _, c := range claimedFiles {
-				_ = d.Source.Reject(c)
-				held = withoutClaim(held, c)
-				rejected++
-			}
-			d.Metrics.AddRejected(int64(len(claimedFiles)))
-			d.Log.Warn("rejected group", "reason", decision.Reason, "n", len(claimedFiles))
-		case delivery.ActionPauseAuth, delivery.ActionPauseEndpoint:
-			d.Log.Error("pausing delivery", "action", decision.Action.String(), "reason", decision.Reason)
+		del, rej, pause, fail := d.deliverGroup(pushCtx, &g, claimedFiles, profiles, &held, &posts)
+		delivered += del
+		rejected += rej
+		if pause != nil {
+			pause.Delivered = delivered
+			pause.Rejected = rejected
 			d.setAggRatio(len(members), posts)
-			return Result{
-				Outcome:   OutcomePaused,
-				Delivered: delivered,
-				Rejected:  rejected,
-				Failure:   decision.Reason,
-				PauseFor:  time.Minute,
-			}
-		case delivery.ActionShrinkBatch:
-			if delivery.For413(len(claimedFiles)) == delivery.ActionReject {
-				for _, c := range claimedFiles {
-					_ = d.Source.Reject(c)
-					held = withoutClaim(held, c)
-					rejected++
-				}
-				d.Metrics.AddRejected(int64(len(claimedFiles)))
-				d.Log.Warn("413 on single-profile group; rejected", "reason", decision.Reason)
-				continue
-			}
-			d.MaxBatchInputBytes = maxInt64(maxBytes/2, 1)
-			d.Metrics.AddRetried(int64(len(claimedFiles)))
-			d.Log.Warn("413/oversize; shrink next batch", "bytes", d.MaxBatchInputBytes, "reason", decision.Reason)
+			return *pause
+		}
+		if fail != nil {
+			fail.Delivered = delivered
+			fail.Rejected = rejected
 			d.setAggRatio(len(members), posts)
-			return Result{Outcome: OutcomeFailed, Delivered: delivered, Rejected: rejected, Failure: decision.Reason}
-		default: // retry / transport → release held (defer) and end pass; Agent backs off
-			d.Metrics.AddRetried(int64(len(claimedFiles)))
-			d.Log.Warn("push failed; releasing held claims", "action", decision.Action.String(), "reason", decision.Reason)
-			d.setAggRatio(len(members), posts)
-			return Result{
-				Outcome:    OutcomeFailed,
-				Delivered:  delivered,
-				Rejected:   rejected,
-				Failure:    decision.Reason,
-				RetryAfter: decision.RetryAfter,
-			}
+			return *fail
 		}
 	}
 
@@ -292,6 +249,71 @@ func (d *Drainer) setAggRatio(profiles, posts int) {
 		return
 	}
 	d.Metrics.SetAggregationRatio(float64(profiles) / float64(posts))
+}
+
+// deliverGroup pushes one aggregation group. On 413/oversize it bisects the group
+// in-process; MaxBatchInputBytes is never permanently reduced.
+func (d *Drainer) deliverGroup(
+	ctx context.Context,
+	g *aggregate.Group,
+	claimedFiles []*spool.Claimed,
+	profiles []*pprof.Profile,
+	held *[]*spool.Claimed,
+	posts *int,
+) (delivered, rejected int, pause, fail *Result) {
+	if len(claimedFiles) == 0 {
+		return 0, 0, nil, nil
+	}
+	decision := d.pushGroup(ctx, g, profiles)
+	*posts++
+	switch decision.Action {
+	case delivery.ActionAck:
+		for _, c := range claimedFiles {
+			if err := d.Source.Acknowledge(c); err != nil {
+				d.Log.Error("ack failed", "file", c.Name, "err", err)
+			}
+			*held = withoutClaim(*held, c)
+			delivered++
+		}
+		d.Metrics.AddDelivered(int64(len(claimedFiles)))
+		return delivered, 0, nil, nil
+	case delivery.ActionReject:
+		for _, c := range claimedFiles {
+			_ = d.Source.Reject(c)
+			*held = withoutClaim(*held, c)
+			rejected++
+		}
+		d.Metrics.AddRejected(int64(len(claimedFiles)))
+		d.Log.Warn("rejected group", "reason", decision.Reason, "n", len(claimedFiles))
+		return 0, rejected, nil, nil
+	case delivery.ActionPauseAuth, delivery.ActionPauseEndpoint:
+		d.Log.Error("pausing delivery", "action", decision.Action.String(), "reason", decision.Reason)
+		return 0, 0, &Result{Outcome: OutcomePaused, Failure: decision.Reason, PauseFor: time.Minute}, nil
+	case delivery.ActionShrinkBatch:
+		if len(claimedFiles) <= 1 || delivery.For413(len(claimedFiles)) == delivery.ActionReject {
+			for _, c := range claimedFiles {
+				_ = d.Source.Reject(c)
+				*held = withoutClaim(*held, c)
+				rejected++
+			}
+			d.Metrics.AddRejected(int64(len(claimedFiles)))
+			d.Log.Warn("413/oversize on single-profile group; rejected", "reason", decision.Reason)
+			return 0, rejected, nil, nil
+		}
+		mid := len(claimedFiles) / 2
+		d.Metrics.AddRetried(int64(len(claimedFiles)))
+		d.Log.Warn("413/oversize; bisect group", "n", len(claimedFiles), "mid", mid, "reason", decision.Reason)
+		d1, r1, p1, f1 := d.deliverGroup(ctx, g, claimedFiles[:mid], profiles[:mid], held, posts)
+		if p1 != nil || f1 != nil {
+			return d1, r1, p1, f1
+		}
+		d2, r2, p2, f2 := d.deliverGroup(ctx, g, claimedFiles[mid:], profiles[mid:], held, posts)
+		return d1 + d2, r1 + r2, p2, f2
+	default: // retry / transport → release held (defer) and end pass; Agent backs off
+		d.Metrics.AddRetried(int64(len(claimedFiles)))
+		d.Log.Warn("push failed; releasing held claims", "action", decision.Action.String(), "reason", decision.Reason)
+		return 0, 0, nil, &Result{Outcome: OutcomeFailed, Failure: decision.Reason, RetryAfter: decision.RetryAfter}
+	}
 }
 
 func (d *Drainer) pushGroup(ctx context.Context, g *aggregate.Group, profiles []*pprof.Profile) delivery.Decision {

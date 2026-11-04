@@ -9,6 +9,36 @@ import (
 	"github.com/tracewick/agent/internal/spool"
 )
 
+func TestQueueLen(t *testing.T) {
+	t.Parallel()
+	if (&spool.Source{}).QueueLen() != 0 {
+		t.Fatal("empty source")
+	}
+	var nilSrc *spool.Source
+	if nilSrc.QueueLen() != 0 {
+		t.Fatal("nil source")
+	}
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "00000000000000000001-aaaaaaaaaaaaaaaa.spool"), []byte("x"), 0o600); err != nil { //nolint:gosec // temp
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "00000000000000000002-bbbbbbbbbbbbbbbb.spool"), []byte("y"), 0o600); err != nil { //nolint:gosec // temp
+		t.Fatal(err)
+	}
+	src, err := spool.NewSource(spool.Config{Directory: dir, ReaderID: "qlen"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	claimed, err := src.Claim()
+	if err != nil || claimed == nil {
+		t.Fatalf("claim: %v %#v", err, claimed)
+	}
+	if src.QueueLen() < 1 {
+		t.Fatalf("expected buffered names after scan, got %d", src.QueueLen())
+	}
+	_ = src.Release(claimed)
+}
+
 func TestBacklogCountsUnclaimed(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()

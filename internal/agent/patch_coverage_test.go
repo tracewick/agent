@@ -154,9 +154,14 @@ func TestDrainShrinksOversizedMultiFileAggregate(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.drainer.Limits.MaxAggregatedPprofBytes = 1
+	before := a.drainer.MaxBatchInputBytes
 	res := a.drainer.Drain(context.Background(), context.Background())
-	if res.Outcome != OutcomeFailed || res.Failure == "" {
-		t.Fatalf("want shrink/fail on oversize multi aggregate, got %#v", res)
+	if a.drainer.MaxBatchInputBytes != before {
+		t.Fatalf("encode budget must not permanently shrink MaxBatchInputBytes")
+	}
+	// Oversized multi-file group is bisected to singles and rejected.
+	if res.Rejected < 1 {
+		t.Fatalf("want rejects after bisect on oversize multi aggregate, got %#v", res)
 	}
 }
 
@@ -248,7 +253,8 @@ func TestRefreshSpoolBacklogLogsScanIssues(t *testing.T) {
 		t.Fatal(err)
 	}
 	a.logScanIssues()
-	a.refreshSpoolBacklog()
+	a.refreshSpoolBacklog(true)
+	a.refreshSpoolBacklog(false) // throttled path uses QueueLen
 
 	nilAgent := &Agent{log: slog.Default()}
 	nilAgent.logScanIssues() // early return when drainer/source is nil

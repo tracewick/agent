@@ -73,6 +73,55 @@ Wire format and delivery decisions live in
 - [ADR 12 — aggregate before delivery](https://github.com/tracewick/tracewick/blob/main/docs/adr/0012-aggregate-before-delivery.md)
 - [ADR 13 — compact-stacks](https://github.com/tracewick/tracewick/blob/main/docs/adr/0013-spool-v2-compact-payload.md)
 
+## Install (server)
+
+Pin a release tag (see [Releases](https://github.com/tracewick/agent/releases)).
+Artifacts are **unsigned** in `0.1.x` — verify `checksums.txt`.
+
+### Binary
+
+Archives ship the binary as `tracewick-agent`:
+
+```bash
+VER=0.1.0
+ARCH=amd64   # or arm64
+curl -fsSL -o agent.tgz \
+  "https://github.com/tracewick/agent/releases/download/v${VER}/tracewick-agent_${VER}_linux_${ARCH}.tar.gz"
+curl -fsSL -o checksums.txt \
+  "https://github.com/tracewick/agent/releases/download/v${VER}/checksums.txt"
+sha256sum -c --ignore-missing checksums.txt
+tar -xzf agent.tgz tracewick-agent
+sudo install -m 0755 tracewick-agent /usr/local/bin/tracewick-agent
+```
+
+Run as the **same UID/GID** as the PHP writer (`0700`/`0600` spool):
+
+```bash
+tracewick-agent run \
+  --spool-dir=/var/spool/tracewick \
+  --pyroscope-url=https://pyroscope.example \
+  --reader-id="$(hostname)-1"
+```
+
+Password for Pyroscope basic auth: `TRACEWICK_PYROSCOPE_PASSWORD` in the
+environment (never argv). Do not put credentials in `--pyroscope-url`.
+Optional: `--metrics-listen` / `TRACEWICK_METRICS_LISTEN`, `--tls-ca` /
+`TRACEWICK_TLS_CA`.
+
+### Container
+
+```bash
+docker pull ghcr.io/tracewick/agent:0.1.0
+docker run --rm --user "$(id -u):$(id -g)" \
+  -v /var/spool/tracewick:/var/spool/tracewick \
+  ghcr.io/tracewick/agent:0.1.0 run \
+    --spool-dir=/var/spool/tracewick \
+    --pyroscope-url=https://pyroscope.example \
+    --once
+```
+
+Compose / Kubernetes examples (UID-compatible): [`deploy/`](deploy/).
+
 ## Develop
 
 ```bash
@@ -83,27 +132,6 @@ make e2e     # cross-process E2E (separate workflow; build tag e2e)
 make build
 ./bin/tracewick-agent version
 ./bin/tracewick-agent run --spool-dir=/var/spool/tracewick --pyroscope-url=http://localhost:4040 --once
-./bin/tracewick-agent run --spool-dir=/var/spool/tracewick --pyroscope-url=http://localhost:4040 \
-  --metrics-listen=127.0.0.1:9090
-```
-
-Password for Pyroscope basic auth: `TRACEWICK_PYROSCOPE_PASSWORD` in the
-environment (never argv; same rule as `tracewick-drain`). Do not put credentials
-in `--pyroscope-url`. Optional Prometheus scrape: `--metrics-listen` /
-`TRACEWICK_METRICS_LISTEN`. Custom HTTPS CA: `--tls-ca` / `TRACEWICK_TLS_CA`.
-
-### Spool permissions (UID)
-
-PHP writes spool dirs as `0700` and files as `0600`. Run the agent as the **same
-UID/GID** as PHP-FPM (or set `runAsUser` / `fsGroup` together). Examples:
-
-- Compose: [`deploy/docker-compose.yml`](deploy/docker-compose.yml)
-- Kubernetes: [`deploy/kubernetes/agent.yaml`](deploy/kubernetes/agent.yaml)
-- Notes: [`deploy/README.md`](deploy/README.md)
-
-```bash
-make docker-build
-docker compose -f deploy/docker-compose.yml up
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) and [AGENTS.md](AGENTS.md).

@@ -1,0 +1,20 @@
+# Codecov settings. Target matches the PHP library bar for core packages.
+coverage:
+  precision: 2
+  round: down
+  status:
+    project:
+      default:
+        target: 90%
+        threshold: 1%
+    patch:
+      default:
+        target: 90%
+
+comment:
+  layout: condensed_header, diff, files
+  require_changes: true
+
+ignore:
+  - "test/**"
+  - "**/*_mock.go"

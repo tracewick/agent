@@ -1,0 +1,83 @@
+# Strict lint bar for Tracewick Agent (enterprise parity with the PHP library's
+# PHPStan max + CS/Rector discipline). Pin the golangci-lint version in CI.
+version: "2"
+
+run:
+  timeout: 5m
+
+formatters:
+  enable:
+    - gofumpt
+  settings:
+    gofumpt:
+      extra:
+        group-params: true
+        clothe-returns: true
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - gocritic
+    - govet
+    - ineffassign
+    - misspell
+    - revive
+    - staticcheck
+    - unconvert
+    - unused
+    - gosec
+  settings:
+    govet:
+      enable-all: true
+      disable:
+        - fieldalignment
+    revive:
+      severity: warning
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-return
+        - name: error-strings
+        - name: error-naming
+        - name: exported
+        - name: if-return
+        - name: increment-decrement
+        - name: var-naming
+        - name: package-comments
+        - name: range
+        - name: receiver-naming
+        - name: time-naming
+        - name: unexported-return
+        - name: indent-error-flow
+        - name: errorf
+        - name: empty-block
+        - name: superfluous-else
+        - name: unused-parameter
+        - name: unreachable-code
+        - name: redefines-builtin-id
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - style
+        - performance
+    gosec:
+      excludes:
+        - G104
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

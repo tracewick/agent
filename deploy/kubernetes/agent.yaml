@@ -1,0 +1,90 @@
+# Minimal sidecar-friendly Deployment. Match securityContext UIDs to the PHP
+# container that writes the spool (0700/0600). emptyDir alone is not enough.
+#
+#   kubectl apply -f deploy/kubernetes/agent.yaml
+#
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: tracewick
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: tracewick
+  labels:
+    app: demo-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: demo-app
+  template:
+    metadata:
+      labels:
+        app: demo-app
+    spec:
+      # Shared ownership for emptyDir spool — required for mode 0700/0600 files.
+      securityContext:
+        fsGroup: 33
+        runAsNonRoot: true
+      containers:
+        - name: php
+          # Replace with your PHP-FPM / app image.
+          image: busybox:1.36
+          command: ["sh", "-c", "mkdir -p /var/spool/tracewick && touch /var/spool/tracewick/.writer-ok && sleep infinity"]
+          securityContext:
+            runAsUser: 33
+            runAsGroup: 33
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: spool
+              mountPath: /var/spool/tracewick
+        - name: tracewick-agent
+          # Build locally: make docker-build && kind load docker-image tracewick-agent:local
+          # Prefer ghcr.io/tracewick/agent:<version> (or digest) in real clusters.
+          image: tracewick-agent:local
+          imagePullPolicy: IfNotPresent
+          args:
+            - run
+            - --reader-id=k8s-agent
+            - --sleep=5s
+            - --metrics-listen=:9090
+          env:
+            - name: TRACEWICK_SPOOL_DIR
+              value: /var/spool/tracewick
+            - name: TRACEWICK_PYROSCOPE_URL
+              value: http://pyroscope.monitoring.svc:4040
+            - name: TRACEWICK_PYROSCOPE_USER
+              valueFrom:
+                secretKeyRef:
+                  name: tracewick-agent
+                  key: pyroscope-user
+                  optional: true
+            - name: TRACEWICK_PYROSCOPE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: tracewick-agent
+                  key: pyroscope-password
+                  optional: true
+          securityContext:
+            runAsUser: 33
+            runAsGroup: 33
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: spool
+              mountPath: /var/spool/tracewick
+          ports:
+            - name: metrics
+              containerPort: 9090
+              protocol: TCP
+      volumes:
+        - name: spool
+          emptyDir: {}

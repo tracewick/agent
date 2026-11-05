@@ -1,0 +1,59 @@
+# Multi-arch binaries + GHCR images. Cosign / SBOM intentionally deferred;
+# release footer states unsigned alpha until they land.
+version: 2
+
+project_name: tracewick-agent
+
+builds:
+  - id: tracewick-agent
+    main: ./cmd/tracewick-agent
+    binary: tracewick-agent
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w -X github.com/tracewick/agent/internal/version.Version={{.Version}}
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+  algorithm: sha256
+
+dockers_v2:
+  - id: tracewick-agent
+    ids: [tracewick-agent]
+    dockerfile: Dockerfile.goreleaser
+    images:
+      - ghcr.io/tracewick/agent
+    tags:
+      - "{{ .Version }}"
+      - "{{ .Tag }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      "org.opencontainers.image.title": "tracewick-agent"
+      "org.opencontainers.image.description": "Tracewick spool sidecar for Pyroscope"
+      "org.opencontainers.image.source": "https://github.com/tracewick/agent"
+      "org.opencontainers.image.licenses": "Apache-2.0"
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+
+changelog:
+  disable: true
+
+release:
+  draft: false
+  # release-please already wrote the changelog body; append the unsigned note.
+  mode: append
+  footer: |
+    ---
+    **Unsigned alpha:** no cosign signatures or SBOM yet. Prefer `checksums.txt` (SHA-256) and pinned image digests from `ghcr.io/tracewick/agent`. Cosign/SBOM land later.

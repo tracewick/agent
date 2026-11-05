@@ -1,5 +1,6 @@
 # syntax=docker/dockerfile:1
-# Early-dev image. Multi-arch publish / SBOM / cosign land with M5 (GoReleaser).
+# Local / Compose image (multi-stage). Published multi-arch images come from
+# GoReleaser + Dockerfile.goreleaser → ghcr.io/tracewick/agent. Cosign/SBOM later.
 # Do not bake a fixed USER here: set runAsUser / compose `user:` to match PHP-FPM
 # (spool dirs are 0700 / files 0600 — a mismatched UID cannot read the spool).
 

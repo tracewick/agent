@@ -1,0 +1,9 @@
+# syntax=docker/dockerfile:1
+# Release image: GoReleaser copies pre-built binaries into the build context
+# under $TARGETPLATFORM/. Local builds use the root Dockerfile (multi-stage).
+# Do not bake a fixed USER: match PHP-FPM UID via runAsUser / compose `user:`.
+
+FROM gcr.io/distroless/static-debian12
+ARG TARGETPLATFORM
+COPY $TARGETPLATFORM/tracewick-agent /usr/local/bin/tracewick-agent
+ENTRYPOINT ["/usr/local/bin/tracewick-agent"]

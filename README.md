@@ -18,12 +18,13 @@ encodes **pprof**, and pushes via the Pyroscope Push API.
 | In alpha | Not yet |
 | --- | --- |
 | Spool claim → aggregate → pprof → Push → ack (`run` / `--once`) | Signed releases (cosign) / SBOM |
-| Same claim protocol as PHP `tracewick-drain` (at-least-once) | Multi-arch container images in GitHub Releases |
-| Stand + Toxiproxy + live Querier + Go↔PHP-drain E2E | Unix socket hand-off (v1.1+) |
-| Codecov / mutation / fuzz / `go tool pprof` CI gates | Stable CLI/env contract (beta+) |
+| Same claim protocol as PHP `tracewick-drain` (at-least-once) | Unix socket hand-off (v1.1+) |
+| Stand + Toxiproxy + live Querier + Go↔PHP-drain E2E | Stable CLI/env contract (beta+) |
+| linux amd64/arm64 binaries + `ghcr.io/tracewick/agent` | |
+| Codecov / mutation / fuzz / `go tool pprof` CI gates | |
 
 GitHub Releases for `v0.1.x` are **unsigned** until cosign is wired. Prefer
-checksums from the release assets.
+`checksums.txt` (SHA-256) and pinned GHCR digests.
 
 ### Ops assumptions (alpha)
 

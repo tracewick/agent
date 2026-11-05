@@ -46,7 +46,7 @@ spec:
               mountPath: /var/spool/tracewick
         - name: tracewick-agent
           # Build locally: make docker-build && kind load docker-image tracewick-agent:local
-          # (or replace with a published tag once GoReleaser images land in M5).
+          # Prefer ghcr.io/tracewick/agent:<version> (or digest) in real clusters.
           image: tracewick-agent:local
           imagePullPolicy: IfNotPresent
           args:

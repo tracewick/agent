@@ -21,9 +21,9 @@ wire semantics here. Humans: [CONTRIBUTING.md](CONTRIBUTING.md) and [README.md](
 | ADR 12 aggregate | https://github.com/tracewick/tracewick/blob/main/docs/adr/0012-aggregate-before-delivery.md |
 | ADR 13 compact-stacks | https://github.com/tracewick/tracewick/blob/main/docs/adr/0013-spool-v2-compact-payload.md |
 
-**Mindset:** README **alpha** is not production readiness. Keep advancing Path to
-alpha (stand / Toxiproxy / Querier / mutation+fuzz / real release cuts; soak via
-`tracewick/benchmarks`). Mirror main-repo harnesses; do not replace Toxiproxy with
+**Mindset:** README **beta** is not production readiness. Keep the alpha floor
+green (stand / Toxiproxy / Querier / mutation+fuzz / release cuts); soak via
+`tracewick/benchmarks`. Mirror main-repo harnesses; do not replace Toxiproxy with
 httptest “backend down”.
 
 ## Commands
@@ -76,7 +76,7 @@ make stand-down
   keep spool (pause, do not reject as trash); 413 → shrink batch (or reject a
   single oversized profile); 400 → reject. Do not invent softer auth behaviour.
 - Never claim “highload-ready” or production readiness ahead of milestones.
-- Do not defer stand/Toxiproxy/mutation/release work with “alpha is enough”.
+- Do not defer stand/Toxiproxy/mutation/release work with “beta is enough”.
 - English only. Conventional Commits. Do not hand-edit `CHANGELOG.md`.
 - Do not invent agent-local ADR numbers that shadow main-repo ADRs; link them.
 - Git flow: branch `feature/*` from `develop`, open PRs into `develop`.

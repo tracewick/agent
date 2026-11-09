@@ -10,24 +10,23 @@ engineering and release discipline as
 files, aggregates them, encodes **pprof**, and pushes to Pyroscope. The PHP
 library and `tracewick-drain` remain the spool writers / reference drain.
 
-> **Alpha (`0.1.x`).** Experimental adoption is fine; do not claim production or
-> highload readiness. Keep advancing stand / Toxiproxy / Querier / mutation+fuzz /
-> real GoReleaser cuts. Soak evidence belongs in
-> [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks).
+> **Beta (`0.2.x`).** Capacity evidence (agent as reader) lives in
+> [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks). Do not claim
+> production / highload readiness. Cosign/SBOM, broader env parity, and socket
+> hand-off remain RC / later.
 
-## Path to alpha
+## Path to release
 
-Treat upcoming work as **alpha readiness**, not sandbox polish:
+Alpha cut is done (`v0.1.0`). Keep the floor green while advancing RC work:
 
 | Contour | Expectation |
 | --- | --- |
 | Delivery proof | Stand + Toxiproxy chaos + Querier live + Go ↔ PHP-drain (see `test/e2e/`) |
-| Test proof | Coverage gates **and** fuzz / `go tool pprof` / mutation (Gremlins or go-mutesting) on core |
-| Release machine | release-please + GoReleaser cut binaries + `ghcr.io/tracewick/agent`; unsigned alpha until cosign |
+| Test proof | Coverage gates **and** fuzz / `go tool pprof` / mutation (Gremlins) on core |
+| Release machine | release-please + GoReleaser: binaries + `ghcr.io/tracewick/agent`; unsigned until cosign |
 | Load truth | Soak/load via [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks), not a weak mini-soak here |
 
-Each PR should be a lifecycle slice toward that table. httptest is fine for unit and
-claim-smoke only.
+httptest is fine for unit and claim-smoke only — not a substitute for Toxiproxy chaos.
 
 ## Commands
 
@@ -111,16 +110,16 @@ Releases follow git flow and are automated with
    request into `main`.
 3. Merging it tags `v<version>` and runs GoReleaser: linux amd64/arm64
    `tar.gz` + `checksums.txt`, multi-arch `ghcr.io/tracewick/agent`, and an
-   **unsigned alpha** footer on the GitHub Release body.
+   **unsigned** footer on the GitHub Release body (no cosign/SBOM yet).
 4. The workflow opens a pull request merging `main` back into `develop`.
 
 Tags `v*` are protected by a ruleset. The workflow uses a dedicated GitHub App
 (`RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`, on the tag ruleset bypass list —
 same pattern as `tracewick/tracewick`). Do not force-push tags by hand.
 
-`v0.1.x` releases stay **unsigned** (no cosign/SBOM) until those land. The empty
-commit `Release-As: 0.1.0` on `develop` pins the first tag number for
-release-please; do not invent tags outside that flow.
+Releases stay **unsigned** until cosign/SBOM land. Pin the next tag with
+`release-as` in `release-please-config.json` when forcing a version (then remove
+it after the release PR merges). Do not invent tags outside that flow.
 
 ## License
 

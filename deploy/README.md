@@ -35,7 +35,7 @@ writes `/var/spool/tracewick`.
 | Source | Image |
 | --- | --- |
 | Local | `make docker-build` → `tracewick-agent:local` |
-| Release | `ghcr.io/tracewick/agent:<version>` (multi-arch amd64/arm64) |
+| Release | `ghcr.io/tracewick/agent:<version>` (multi-arch amd64/arm64; e.g. `0.2.0`) |
 
 ```bash
 make docker-build

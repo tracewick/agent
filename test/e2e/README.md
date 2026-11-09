@@ -1,4 +1,4 @@
-# Cross-process E2E (M4+ → alpha)
+# Cross-process E2E
 
 These tests exercise real `tracewick-agent` processes against a shared spool
 directory. They are **not** part of `make ci` / the `Checks` job
@@ -16,10 +16,10 @@ make stand-down
 Without the three env vars, stand-backed tests **skip**; the two-agent claim-smoke
 still runs (httptest). CI `e2e.yml` starts the stand and exports the env.
 
-## Path to alpha
+## Release posture
 
-README marks **alpha (`0.1.x`)**, not production readiness. Keep advancing
-release cuts (GoReleaser), honest unsigned notes until cosign, and soak via
+README marks **beta (`0.2.x`)**, not production readiness. Keep release cuts
+(GoReleaser), honest unsigned notes until cosign, and soak via
 [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks). E2E here
 covers stand, Toxiproxy chaos, Querier live, and Go + PHP-drain coexistence.
 

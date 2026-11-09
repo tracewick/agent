@@ -1,5 +1,5 @@
 # Multi-arch binaries + GHCR images. Cosign / SBOM intentionally deferred;
-# release footer states unsigned alpha until they land.
+# release footer states unsigned until they land.
 version: 2
 
 project_name: tracewick-agent
@@ -56,4 +56,4 @@ release:
   mode: append
   footer: |
     ---
-    **Unsigned alpha:** no cosign signatures or SBOM yet. Prefer `checksums.txt` (SHA-256) and pinned image digests from `ghcr.io/tracewick/agent`. Cosign/SBOM land later.
+    **Unsigned release:** no cosign signatures or SBOM yet. Prefer `checksums.txt` (SHA-256) and pinned image digests from `ghcr.io/tracewick/agent`. Cosign/SBOM land later.

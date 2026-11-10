@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0](https://github.com/tracewick/agent/compare/v0.1.0...v0.2.0) (2026-11-09)
+
+
+### Fixed
+
+* **release:** GHCR via GITHUB_TOKEN + republish dispatch ([a98a135](https://github.com/tracewick/agent/commit/a98a135aefac4a12deed8d7a8ed41efc9c7673d2))
+* **release:** push GHCR with GITHUB_TOKEN, not the App ([2672bbc](https://github.com/tracewick/agent/commit/2672bbccd6ba14a81f2b7d0c30b4f3f13ba2f198))
+
 ## 0.1.0 (2026-11-05)
 
 

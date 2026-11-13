@@ -14,7 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  GO_VERSION: "1.27.3"
+  GO_VERSION: "1.27.4"
   PYROSCOPE_URL: http://127.0.0.1:4040
   PYROSCOPE_TOXIC_URL: http://127.0.0.1:14040
   TOXIPROXY_URL: http://127.0.0.1:8474

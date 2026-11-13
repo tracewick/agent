@@ -4,7 +4,7 @@
 # Do not bake a fixed USER here: set runAsUser / compose `user:` to match PHP-FPM
 # (spool dirs are 0700 / files 0600 — a mismatched UID cannot read the spool).
 
-ARG GO_VERSION=1.27.3
+ARG GO_VERSION=1.27.4
 
 FROM golang:${GO_VERSION}-bookworm AS build
 WORKDIR /src

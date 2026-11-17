@@ -156,11 +156,33 @@ and a Pyroscope base URL.
 | Tenant (`X-Scope-OrgID`) | `--pyroscope-tenant` | `TRACEWICK_PYROSCOPE_TENANT` |
 | Prometheus `/metrics` | `--metrics-listen` | `TRACEWICK_METRICS_LISTEN` |
 | Extra TLS CA PEM | `--tls-ca` | `TRACEWICK_TLS_CA` |
+| Reader identity | `--reader-id` | `TRACEWICK_READER_ID` |
+| Merge window (integer seconds, 10–15) | `--aggregation-window` | `TRACEWICK_AGGREGATION_WINDOW` |
+| Idle delay (duration, e.g. `250ms`, `5s`) | `--sleep` | `TRACEWICK_SLEEP` |
+| Shutdown grace (duration, e.g. `30s`) | `--shutdown-grace` | `TRACEWICK_SHUTDOWN_GRACE` |
+| Rejected-file retention (count) | `--max-rejected-files` | `TRACEWICK_MAX_REJECTED_FILES` |
+| Stack cap (count) | `--max-stacks` | `TRACEWICK_MAX_STACKS` |
+| Frame cap (count) | `--max-frames` | `TRACEWICK_MAX_FRAMES` |
+| String cap (count) | `--max-strings` | `TRACEWICK_MAX_STRINGS` |
+| Held decoded budget (decimal bytes) | `--max-held-decoded-bytes` | `TRACEWICK_MAX_HELD_DECODED_BYTES` |
+| In-flight budget (decimal bytes) | `--max-in-flight-bytes` | `TRACEWICK_MAX_IN_FLIGHT_BYTES` |
 
-CLI flags override env when both are set. Password must never appear on argv or
-in `--pyroscope-url` userinfo. Other knobs (`--reader-id`, `--aggregation-window`,
-`--sleep`, decode/memory caps, `--once`, …) are flags today — see
-`tracewick-agent run --help`.
+An explicitly supplied CLI option wins over env **including an empty value**. Empty optional
+strings clear the setting (for example `--metrics-listen=` disables metrics); `--reader-id=`
+resets the automatic host/pid identifier. Empty required strings or numeric/duration options
+fail validation, without falling back to env. A valid CLI override ignores an invalid env value.
+Empty environment variables mean unset and use defaults. `--once` and `--help` remain CLI-only.
+
+Formats and bounds match CLI. Zero sleep/grace and rejected retention are valid; zero decode/memory
+caps keep existing defaults. Byte budgets use decimal byte counts, not `64M` suffixes. PHP drain
+uses integer seconds in `TRACEWICK_SLEEP_SECONDS`; this agent uses duration strings in
+`TRACEWICK_SLEEP`. Defaults are unchanged (see `tracewick-agent run --help`).
+
+The agent reads the process environment (`os.Getenv`); it does not load `.env` files. Docker
+Compose's `.env` is an interpolation source: pass values through `environment` or `env_file`
+to put them in the container environment. systemd can supply them with `EnvironmentFile`.
+Password remains environment-only and must not appear on argv or in URL userinfo; clearing an
+auth user while a password is present is an error.
 
 ### Long-running sidecar (recommended)
 

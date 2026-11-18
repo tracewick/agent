@@ -133,9 +133,11 @@ jobs:
         with:
           distribution: goreleaser
           version: v2.20.2
-          args: check
+          install-only: true
       - name: Build archives and SBOMs without publishing or signing
-        run: goreleaser release --snapshot --clean --skip=publish,sign,docker
+        run: |
+          goreleaser check
+          goreleaser release --snapshot --clean --skip=publish,sign,docker
       - name: Validate snapshot and reject damaged evidence
         run: |
           python3 scripts/check-release-artifacts.py dist --unsigned \

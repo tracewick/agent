@@ -25,15 +25,18 @@ encodes **pprof**, and pushes via the Pyroscope Push API.
 
 | In beta | Later (RC / 1.0+) |
 | --- | --- |
-| Spool claim → aggregate → pprof → Push → ack (`run` / `--once`) | Signed releases (cosign) / SBOM |
+| Spool claim → aggregate → pprof → Push → ack (`run` / `--once`) | |
 | Same claim protocol as PHP `tracewick-drain` (at-least-once) | Unix socket hand-off (v1.1+) |
-| Stand + Toxiproxy + live Querier + Go↔PHP-drain E2E | Broader CLI/env parity with drain |
+| Stand + Toxiproxy + live Querier + Go↔PHP-drain E2E | |
+| Operational CLI/env settings (develop; not in published 0.2.1) | |
 | linux amd64/arm64 binaries + `ghcr.io/tracewick/agent` | |
 | Codecov / mutation / fuzz / `go tool pprof` CI gates | |
 | Soak / RPS / chaos / spool-pressure goldens (agent reader) | |
 
-GitHub Releases are **unsigned** until cosign is wired. Prefer `checksums.txt`
-(SHA-256) and pinned GHCR digests.
+The release workflow generates archive SBOMs, signs their checksum manifest with
+keyless Cosign, and signs SBOM-bearing GHCR image indexes. Existing 0.2.x releases
+remain **unsigned**; the first signed publication still needs a successful release
+run. See [verification and recovery](deploy/verify-release.md).
 
 ### Ops assumptions
 
@@ -112,7 +115,7 @@ Wire format and delivery decisions live in
 ## Install
 
 Pin a release tag (see [Releases](https://github.com/tracewick/agent/releases)).
-Artifacts are **unsigned** — verify `checksums.txt` (and prefer an image digest
+Existing 0.2.x artifacts are **unsigned** — verify `checksums.txt` (and prefer an image digest
 for containers).
 
 ### Binary (linux amd64 / arm64)

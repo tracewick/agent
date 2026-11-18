@@ -46,4 +46,6 @@ docker run --rm --user "$(id -u):$(id -g)" \
   tracewick-agent:local run --once
 ```
 
-Published tags are **unsigned** until cosign lands; pin by digest when possible.
+Existing 0.2.x releases are **unsigned**. For releases made by the signed-release
+workflow, verify the checksum bundle or GHCR index signature before use, then pin
+the image digest. See [SBOM/signature verification](verify-release.md).

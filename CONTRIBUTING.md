@@ -12,8 +12,8 @@ library and `tracewick-drain` remain the spool writers / reference drain.
 
 > **Beta (`0.2.x`).** Capacity evidence (agent as reader) lives in
 > [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks). Do not claim
-> production / highload readiness. Cosign/SBOM, broader env parity, and socket
-> hand-off remain RC / later.
+> production / highload readiness. Operational env parity is in develop; socket
+> hand-off remains v1.1+. Signed-release configuration is described below.
 
 ## Path to release
 
@@ -23,7 +23,7 @@ Alpha cut is done (`v0.1.0`). Keep the floor green while advancing RC work:
 | --- | --- |
 | Delivery proof | Stand + Toxiproxy chaos + Querier live + Go ↔ PHP-drain (see `test/e2e/`) |
 | Test proof | Coverage gates **and** fuzz / `go tool pprof` / mutation (Gremlins) on core |
-| Release machine | release-please + GoReleaser: binaries + `ghcr.io/tracewick/agent`; unsigned until cosign |
+| Release machine | release-please + GoReleaser: binaries, archive SBOMs, signed checksums and SBOM-bearing signed GHCR indexes |
 | Load truth | Soak/load via [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks), not a weak mini-soak here |
 
 httptest is fine for unit and claim-smoke only — not a substitute for Toxiproxy chaos.
@@ -110,14 +110,22 @@ Releases follow git flow and are automated with
    request into `main`.
 3. Merging it tags `v<version>` and runs GoReleaser: linux amd64/arm64
    `tar.gz` + `checksums.txt`, multi-arch `ghcr.io/tracewick/agent`, and an
-   **unsigned** footer on the GitHub Release body (no cosign/SBOM yet).
+   footer linking [SBOM/signature verification](deploy/verify-release.md).
+   Archive SBOMs are generated with Syft, checksums are signed with keyless
+   Cosign, and BuildKit SBOM-bearing image indexes are signed by digest.
 4. The workflow opens a pull request merging `main` back into `develop`.
 
 Tags `v*` are protected by a ruleset. The workflow uses a dedicated GitHub App
 (`RELEASE_APP_ID` / `RELEASE_APP_PRIVATE_KEY`, on the tag ruleset bypass list —
 same pattern as `tracewick/tracewick`). Do not force-push tags by hand.
 
-Releases stay **unsigned** until cosign/SBOM land. Pin the next tag with
+Existing 0.2.x releases remain **unsigned**. The first signed release must pass
+the publishing job and verification steps; a local snapshot is not an OIDC test.
+The Release workflow must run from main, including manual recovery, so its exact
+certificate identity ends in `release.yml@refs/heads/main`. Only the publishing
+job has OIDC permission; no persistent signing key is required. Tool versions are
+pinned in the release and unsigned-packaging CI jobs; update them together.
+See [verification and recovery](deploy/verify-release.md). Pin the next tag with
 `release-as` in `release-please-config.json` when forcing a version (then remove
 it after the release PR merges). Do not invent tags outside that flow.
 

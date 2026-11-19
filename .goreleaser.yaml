@@ -1,5 +1,4 @@
-# Multi-arch binaries + GHCR images. Cosign / SBOM intentionally deferred;
-# release footer states unsigned until they land.
+# Multi-arch binaries and GHCR images, with SBOMs and keyless signatures.
 version: 2
 
 project_name: tracewick-agent
@@ -26,6 +25,29 @@ checksum:
   name_template: checksums.txt
   algorithm: sha256
 
+# These SBOMs describe the actual archives, not the source checkout.
+sboms:
+  - artifacts: archive
+    documents:
+      - "{{ .ArtifactName }}.sbom.json"
+    args:
+      - "$artifact"
+      - "--output"
+      - "cyclonedx-json=$document"
+      - "--source-name={{ .ProjectName }}"
+      - "--source-version={{ .Version }}"
+
+# The checksum manifest covers both archives and their SBOMs.
+signs:
+  - cmd: cosign
+    artifacts: checksum
+    signature: "${artifact}.sigstore.json"
+    args:
+      - sign-blob
+      - "--bundle=${signature}"
+      - "${artifact}"
+      - "--yes"
+
 dockers_v2:
   - id: tracewick-agent
     ids: [tracewick-agent]
@@ -39,6 +61,11 @@ dockers_v2:
     platforms:
       - linux/amd64
       - linux/arm64
+    # BuildKit attaches per-platform SPDX SBOMs to the OCI index.
+    sbom: true
+    annotations:
+      "index:org.opencontainers.image.version": "{{ .Version }}"
+      "index:org.opencontainers.image.revision": "{{ .FullCommit }}"
     labels:
       "org.opencontainers.image.title": "tracewick-agent"
       "org.opencontainers.image.description": "Tracewick spool sidecar for Pyroscope"
@@ -47,13 +74,24 @@ dockers_v2:
       "org.opencontainers.image.version": "{{ .Version }}"
       "org.opencontainers.image.revision": "{{ .FullCommit }}"
 
+# Sign the index by digest, binding its platform manifests and SBOM attestations.
+docker_signs:
+  - artifacts: ""
+    args:
+      - sign
+      - "${artifact}@${digest}"
+      - "--yes"
+
 changelog:
   disable: true
 
 release:
   draft: false
-  # release-please already wrote the changelog body; append the unsigned note.
+  # release-please already wrote the changelog body.
   mode: append
   footer: |
     ---
-    **Unsigned release:** no cosign signatures or SBOM yet. Prefer `checksums.txt` (SHA-256) and pinned image digests from `ghcr.io/tracewick/agent`. Cosign/SBOM land later.
+    Archive SBOMs and a Sigstore bundle for `checksums.txt` accompany this release.
+    GHCR image indexes are signed by digest and include per-platform SPDX SBOMs.
+    Verify the release workflow completed successfully and follow the
+    [verification instructions](https://github.com/tracewick/agent/blob/main/deploy/verify-release.md).

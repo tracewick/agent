@@ -112,3 +112,34 @@ jobs:
 
       - name: Tests
         run: go test -race ./...
+
+  release-check:
+    name: Release packaging (unsigned)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # No OIDC or publishing permissions: PRs build and inspect snapshots only.
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+      - uses: anchore/sbom-action/download-syft@fffec3d851af758d56fee099cf3fbf8aa8779843 # v0.24.3
+        with:
+          syft-version: v1.57.2
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          distribution: goreleaser
+          version: v2.20.2
+          install-only: true
+      - name: Build archives and SBOMs without publishing or signing
+        run: |
+          goreleaser check
+          goreleaser release --snapshot --clean --skip=publish,sign,docker
+      - name: Validate snapshot and reject damaged evidence
+        run: |
+          python3 scripts/check-release-artifacts.py dist --unsigned \
+            --version "$(jq -r .version dist/metadata.json)"
+          python3 -m unittest discover -s scripts -p 'test_*.py' -v

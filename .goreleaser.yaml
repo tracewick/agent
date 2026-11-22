@@ -57,7 +57,7 @@ dockers_v2:
     tags:
       - "{{ .Version }}"
       - "{{ .Tag }}"
-      - latest
+      - "{{ if not .Prerelease }}latest{{ end }}"
     platforms:
       - linux/amd64
       - linux/arm64
@@ -87,6 +87,7 @@ changelog:
 
 release:
   draft: false
+  prerelease: auto
   # release-please already wrote the changelog body.
   mode: append
   footer: |

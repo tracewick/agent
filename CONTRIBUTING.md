@@ -10,9 +10,9 @@ engineering and release discipline as
 files, aggregates them, encodes **pprof**, and pushes to Pyroscope. The PHP
 library and `tracewick-drain` remain the spool writers / reference drain.
 
-> **Beta (`0.2.x`).** Capacity evidence (agent as reader) lives in
+> **Release candidate (`1.0.0-rc.1`).** Capacity evidence (agent as reader) lives in
 > [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks). Do not claim
-> production / highload readiness. Operational env parity is in develop; socket
+> production / highload readiness. Operational env parity is included; socket
 > hand-off remains v1.1+. Signed-release configuration is described below.
 
 ## Path to release
@@ -125,9 +125,35 @@ The Release workflow must run from main, including manual recovery, so its exact
 certificate identity ends in `release.yml@refs/heads/main`. Only the publishing
 job has OIDC permission; no persistent signing key is required. Tool versions are
 pinned in the release and unsigned-packaging CI jobs; update them together.
-See [verification and recovery](deploy/verify-release.md). Pin the next tag with
-`release-as` in `release-please-config.json` when forcing a version (then remove
-it after the release PR merges). Do not invent tags outside that flow.
+See [verification and recovery](deploy/verify-release.md). Do not invent tags outside that flow.
+
+### Release candidates
+
+The 1.0 series uses `versioning: prerelease`, `prerelease-type: rc` and
+`prerelease: true` in `release-please-config.json`. A parseable Conventional
+Commit in the preparation branch selects the first candidate:
+
+```text
+chore: prepare 1.0.0-rc.1
+
+Release-As: 1.0.0-rc.1
+```
+
+The maintainer merges that branch with a merge commit, then reviews and merges
+the generated `chore: release 1.0.0-rc.1` PR. The bot creates `v1.0.0-rc.1`;
+do not edit the manifest/changelog or create tags manually. GitHub's default
+`Merge pull request #N` subject does not parse a Release-As footer.
+
+GoReleaser uses `prerelease: auto` to preserve the GitHub prerelease status.
+Prerelease images publish only their versioned tags; `latest` remains stable.
+Keep prerelease mode for subsequent candidates and update the documented version.
+To select a version explicitly, add a new Release-As footer. For final 1.0.0,
+switch `versioning` to `default`, set `prerelease: false`, remove `prerelease-type`
+and use `Release-As: 1.0.0` on a Conventional Commit. Review the generated version
+and prerelease status before merging.
+
+The E2E `make php-drain` fixture pins the published core `1.0.0-rc.1`, including
+when refreshing an existing local cache. It does not change the wire contract.
 
 ## License
 

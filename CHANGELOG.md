@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0-rc.1](https://github.com/tracewick/agent/compare/v0.2.1...v1.0.0-rc.1) (2026-11-22)
+
+
+### Added
+
+* **config:** support operational settings from environment ([#59](https://github.com/tracewick/agent/issues/59)) ([a15f0d3](https://github.com/tracewick/agent/commit/a15f0d310ba6d5942e67b37d3c3c55dc1b3b8100))
+
+
+### Chores
+
+* prepare 1.0.0-rc.1 ([5d790da](https://github.com/tracewick/agent/commit/5d790da614987eebaeb008dcf21a3a9bb25c97a2))
+
 ## [0.2.1](https://github.com/tracewick/agent/compare/v0.2.0...v0.2.1) (2026-11-13)
 
 

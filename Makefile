@@ -69,14 +69,12 @@ goreleaser-check: ## Validate .goreleaser.yaml (does not publish)
 	@command -v goreleaser >/dev/null || $(GO) install github.com/goreleaser/goreleaser/v2@latest
 	goreleaser check
 
-php-drain: ## Install Packagist tracewick/tracewick for Go+PHP-drain e2e
+php-drain: ## Install Packagist core 1.0.0-rc.1 for Go+PHP-drain e2e
 	@command -v composer >/dev/null || (echo 'composer required for make php-drain' && exit 1)
 	@command -v php >/dev/null || (echo 'php required for make php-drain' && exit 1)
 	mkdir -p $(PHP_DRAIN_DIR)
-	@if [ ! -f $(PHP_DRAIN_DIR)/composer.json ]; then \
-		printf '%s\n' '{"name":"tracewick/agent-e2e-drain","require":{"tracewick/tracewick":"^0.1"},"config":{"sort-packages":true}}' \
-			> $(PHP_DRAIN_DIR)/composer.json; \
-	fi
+	@printf '%s\n' '{"name":"tracewick/agent-e2e-drain","require":{"tracewick/tracewick":"1.0.0-rc.1"},"config":{"sort-packages":true}}' \
+		> $(PHP_DRAIN_DIR)/composer.json
 	cd $(PHP_DRAIN_DIR) && composer update --no-interaction --no-progress --prefer-dist --no-dev
 	@test -x $(PHP_DRAIN_BIN) || test -f $(PHP_DRAIN_BIN)
 

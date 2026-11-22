@@ -14,21 +14,21 @@ PHP applications write **spool v2** files; this agent claims them, aggregates,
 encodes **pprof**, and pushes via the Pyroscope Push API.
 
 > [!WARNING]
-> **Beta (`0.2.x`).** Capacity evidence for the default spool path (with this
-> agent as reader) is published in
-> [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks). Flags,
-> defaults, and ops behaviour are not frozen until 1.0.0 — pin a release and
-> read the changelog before upgrading. Not a production / highload readiness
-> claim.
+> **Release candidate (`1.0.0-rc.1`).** Pin the candidate explicitly and read the
+> changelog before upgrading from 0.2. Flags, defaults and operational behaviour
+> may still need compatibility fixes during RC validation; the stable contract
+> starts with final 1.0.0. Capacity evidence lives in
+> [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks) and describes
+> its recorded versions and workloads.
 
 ## Status
 
-| In beta | Later (RC / 1.0+) |
+| In this candidate | Later |
 | --- | --- |
 | Spool claim → aggregate → pprof → Push → ack (`run` / `--once`) | |
 | Same claim protocol as PHP `tracewick-drain` (at-least-once) | Unix socket hand-off (v1.1+) |
 | Stand + Toxiproxy + live Querier + Go↔PHP-drain E2E | |
-| Operational CLI/env settings (develop; not in published 0.2.1) | |
+| Operational CLI/env settings (new since 0.2.1) | |
 | linux amd64/arm64 binaries + `ghcr.io/tracewick/agent` | |
 | Codecov / mutation / fuzz / `go tool pprof` CI gates | |
 | Soak / RPS / chaos / spool-pressure goldens (agent reader) | |
@@ -73,6 +73,10 @@ Canonical cloud goldens use depth-48 stacks on an 8 vCPU Timeweb VPS with
 
 Full tables and pins:
 
+- [72-hour RoadRunner + agent soak](https://github.com/tracewick/benchmarks/blob/main/reports/2026-11-22-soak-rr-agent-72h.md)
+  records agent `a15f0d3`; the [current-development campaign](https://github.com/tracewick/benchmarks/pull/11)
+  covers this candidate's runtime source `d464fac`, including recovery and real Symfony delivery.
+  The latter is a separate campaign, not another 72-hour run.
 - [soak FPM](https://github.com/tracewick/benchmarks/blob/main/reports/2026-11-07-soak-fpm-agent-depth48-cloud.md) ·
   [Swoole](https://github.com/tracewick/benchmarks/blob/main/reports/2026-11-07-soak-swoole-agent-depth48-cloud.md) ·
   [RoadRunner](https://github.com/tracewick/benchmarks/blob/main/reports/2026-11-08-soak-rr-agent-depth48-cloud.md)
@@ -117,20 +121,26 @@ Wire format and delivery decisions live in
 Pin a release tag (see [Releases](https://github.com/tracewick/agent/releases)).
 Existing 0.2.x artifacts are **unsigned** — verify `checksums.txt` (and prefer an image digest
 for containers).
+For this candidate, first [verify the signed checksums and matching archive/SBOM](deploy/verify-release.md).
+The commands below become usable after the candidate's release workflow publishes its assets.
 
 ### Binary (linux amd64 / arm64)
 
 Archives ship the binary as `tracewick-agent`:
 
 ```bash
-VER=0.2.0
+VER=1.0.0-rc.1
 ARCH=amd64   # or arm64
-curl -fsSL -o agent.tgz \
-  "https://github.com/tracewick/agent/releases/download/v${VER}/tracewick-agent_${VER}_linux_${ARCH}.tar.gz"
+ARCHIVE="tracewick-agent_${VER}_linux_${ARCH}.tar.gz"
+curl -fsSL -o "$ARCHIVE" \
+  "https://github.com/tracewick/agent/releases/download/v${VER}/${ARCHIVE}" || exit 1
 curl -fsSL -o checksums.txt \
-  "https://github.com/tracewick/agent/releases/download/v${VER}/checksums.txt"
-sha256sum -c --ignore-missing checksums.txt
-tar -xzf agent.tgz tracewick-agent
+  "https://github.com/tracewick/agent/releases/download/v${VER}/checksums.txt" || exit 1
+# Authenticate checksums.txt with Cosign as linked above before continuing.
+awk -v name="$ARCHIVE" '$2 == name {print; count++} END {if (count != 1) exit 1}' \
+  checksums.txt > selected-checksum.txt || exit 1
+sha256sum --check selected-checksum.txt || exit 1
+tar -xzf "$ARCHIVE" tracewick-agent
 sudo install -m 0755 tracewick-agent /usr/local/bin/tracewick-agent
 tracewick-agent version
 ```
@@ -138,12 +148,13 @@ tracewick-agent version
 ### Container (GHCR)
 
 ```bash
-docker pull ghcr.io/tracewick/agent:0.2.0
+docker pull ghcr.io/tracewick/agent:1.0.0-rc.1
 # pin by digest in production when possible:
 # docker pull ghcr.io/tracewick/agent@sha256:…
 ```
 
 Compose / Kubernetes examples (UID-compatible): [`deploy/`](deploy/).
+RC images have versioned tags (`1.0.0-rc.1` and `v1.0.0-rc.1`); they do not update `latest`.
 
 ## Configure and run
 
@@ -246,7 +257,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   -e TRACEWICK_SPOOL_DIR=/var/spool/tracewick \
   -e TRACEWICK_PYROSCOPE_URL=https://pyroscope.example \
   -e TRACEWICK_PYROSCOPE_PASSWORD \
-  ghcr.io/tracewick/agent:0.2.0 run --reader-id=sidecar-1
+  ghcr.io/tracewick/agent:1.0.0-rc.1 run --reader-id=sidecar-1
 ```
 
 For a one-shot pass, append `--once`. Compose and Kubernetes manifests:

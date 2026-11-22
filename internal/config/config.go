@@ -84,6 +84,8 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 		MaxCardinality:       defaultMaxCardinality,
 	}
 
+	args = withEnvironmentOptions(args, getenv)
+
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		switch {
@@ -341,6 +343,44 @@ func Load(args []string, getenv func(string) string) (Config, error) {
 	return cfg, nil
 }
 
+// withEnvironmentOptions supplies only options absent from argv. Appending them
+// keeps --help independent of malformed environment values and reuses CLI parsing
+// and validation without changing the caller's argument slice.
+func withEnvironmentOptions(args []string, getenv func(string) string) []string {
+	supplied := make(map[string]bool)
+	for i := 0; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--once" || arg == "--help" || arg == "-h" {
+			continue
+		}
+		name, _, inline := strings.Cut(arg, "=")
+		supplied[name] = true
+		if !inline {
+			i++ // The existing parser consumes the next token as this option's value.
+		}
+	}
+	resolved := append([]string(nil), args...)
+	for _, option := range []struct{ flag, env string }{
+		{"--reader-id", "TRACEWICK_READER_ID"},
+		{"--aggregation-window", "TRACEWICK_AGGREGATION_WINDOW"},
+		{"--sleep", "TRACEWICK_SLEEP"},
+		{"--shutdown-grace", "TRACEWICK_SHUTDOWN_GRACE"},
+		{"--max-rejected-files", "TRACEWICK_MAX_REJECTED_FILES"},
+		{"--max-stacks", "TRACEWICK_MAX_STACKS"},
+		{"--max-frames", "TRACEWICK_MAX_FRAMES"},
+		{"--max-strings", "TRACEWICK_MAX_STRINGS"},
+		{"--max-held-decoded-bytes", "TRACEWICK_MAX_HELD_DECODED_BYTES"},
+		{"--max-in-flight-bytes", "TRACEWICK_MAX_IN_FLIGHT_BYTES"},
+	} {
+		if !supplied[option.flag] {
+			if value := getenv(option.env); value != "" {
+				resolved = append(resolved, option.flag+"="+value)
+			}
+		}
+	}
+	return resolved
+}
+
 // DeliveryLimits returns DefaultLimits with positive Config overrides applied.
 func (c *Config) DeliveryLimits() delivery.Limits {
 	l := delivery.DefaultLimits()
@@ -375,20 +415,24 @@ Options:
   --pyroscope-url=URL           Pyroscope base URL (env TRACEWICK_PYROSCOPE_URL)
   --pyroscope-user=USER         basic auth user (env TRACEWICK_PYROSCOPE_USER)
   --pyroscope-tenant=ID         X-Scope-OrgID (env TRACEWICK_PYROSCOPE_TENANT)
-  --reader-id=ID                claim reader id (default: host-pid)
-  --aggregation-window=S        merge window 10–15 seconds (default: 15)
-  --sleep=DURATION              idle poll delay (default: 5s)
-  --shutdown-grace=DURATION     after SIGTERM stop new claims immediately; finish in-flight for DURATION (0=stop now; default: 30s)
-  --max-rejected-files=N        keep up to N files under rejected/ (default: 100; 0 deletes)
-  --max-stacks=N                decode/merge stack cap (default: 4096; raise with PHP builder)
-  --max-frames=N                decode/merge frame cap (default: 16384)
-  --max-strings=N               decode/merge string cap (default: 32768)
-  --max-held-decoded-bytes=N    sum of estimated decoded profile bytes per pass (default: 64MiB)
-  --max-in-flight-bytes=N       sum of claimed spool bytes per pass / encoded push cap (default: 64MiB)
+  --reader-id=ID                claim reader id (default: host-pid) (env TRACEWICK_READER_ID)
+  --aggregation-window=S        merge window 10–15 seconds (default: 15) (env TRACEWICK_AGGREGATION_WINDOW)
+  --sleep=DURATION              idle poll delay (default: 5s) (env TRACEWICK_SLEEP)
+  --shutdown-grace=DURATION     after SIGTERM stop new claims immediately; finish in-flight for DURATION (0=stop now; default: 30s) (env TRACEWICK_SHUTDOWN_GRACE)
+  --max-rejected-files=N        keep up to N files under rejected/ (default: 100; 0 deletes) (env TRACEWICK_MAX_REJECTED_FILES)
+  --max-stacks=N                decode/merge stack cap (default: 4096; raise with PHP builder) (env TRACEWICK_MAX_STACKS)
+  --max-frames=N                decode/merge frame cap (default: 16384) (env TRACEWICK_MAX_FRAMES)
+  --max-strings=N               decode/merge string cap (default: 32768) (env TRACEWICK_MAX_STRINGS)
+  --max-held-decoded-bytes=N    sum of estimated decoded profile bytes per pass (default: 64MiB) (env TRACEWICK_MAX_HELD_DECODED_BYTES)
+  --max-in-flight-bytes=N       sum of claimed spool bytes per pass / encoded push cap (default: 64MiB) (env TRACEWICK_MAX_IN_FLIGHT_BYTES)
   --metrics-listen=ADDR         Prometheus /metrics bind (env TRACEWICK_METRICS_LISTEN; empty disables)
   --tls-ca=PATH                 extra PEM CA roots for HTTPS (env TRACEWICK_TLS_CA)
   --once                        deliver one pass and exit
   --help                        show this help
+
+Explicit CLI options override env, including empty values. Empty optional strings
+clear settings; empty required/numeric values are errors. Empty env uses defaults.
+No .env file is loaded. --once and --help are CLI-only.
 
 Password: set TRACEWICK_PYROSCOPE_PASSWORD in the environment (never argv).
 Do not put credentials in --pyroscope-url; use TRACEWICK_PYROSCOPE_USER / TRACEWICK_PYROSCOPE_PASSWORD.

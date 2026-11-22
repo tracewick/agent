@@ -12,6 +12,7 @@
 /build/
 .golangci.cache/
 .cache/
+__pycache__/
 
 # IDE / OS
 .idea/

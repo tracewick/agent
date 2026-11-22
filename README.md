@@ -14,26 +14,29 @@ PHP applications write **spool v2** files; this agent claims them, aggregates,
 encodes **pprof**, and pushes via the Pyroscope Push API.
 
 > [!WARNING]
-> **Beta (`0.2.x`).** Capacity evidence for the default spool path (with this
-> agent as reader) is published in
-> [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks). Flags,
-> defaults, and ops behaviour are not frozen until 1.0.0 — pin a release and
-> read the changelog before upgrading. Not a production / highload readiness
-> claim.
+> **Release candidate (`1.0.0-rc.1`).** Pin the candidate explicitly and read the
+> changelog before upgrading from 0.2. Flags, defaults and operational behaviour
+> may still need compatibility fixes during RC validation; the stable contract
+> starts with final 1.0.0. Capacity evidence lives in
+> [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks) and describes
+> its recorded versions and workloads.
 
 ## Status
 
-| In beta | Later (RC / 1.0+) |
+| In this candidate | Later |
 | --- | --- |
-| Spool claim → aggregate → pprof → Push → ack (`run` / `--once`) | Signed releases (cosign) / SBOM |
+| Spool claim → aggregate → pprof → Push → ack (`run` / `--once`) | |
 | Same claim protocol as PHP `tracewick-drain` (at-least-once) | Unix socket hand-off (v1.1+) |
-| Stand + Toxiproxy + live Querier + Go↔PHP-drain E2E | Broader CLI/env parity with drain |
+| Stand + Toxiproxy + live Querier + Go↔PHP-drain E2E | |
+| Operational CLI/env settings (new since 0.2.1) | |
 | linux amd64/arm64 binaries + `ghcr.io/tracewick/agent` | |
 | Codecov / mutation / fuzz / `go tool pprof` CI gates | |
 | Soak / RPS / chaos / spool-pressure goldens (agent reader) | |
 
-GitHub Releases are **unsigned** until cosign is wired. Prefer `checksums.txt`
-(SHA-256) and pinned GHCR digests.
+The release workflow generates archive SBOMs, signs their checksum manifest with
+keyless Cosign, and signs SBOM-bearing GHCR image indexes. Existing 0.2.x releases
+remain **unsigned**; the first signed publication still needs a successful release
+run. See [verification and recovery](deploy/verify-release.md).
 
 ### Ops assumptions
 
@@ -70,6 +73,10 @@ Canonical cloud goldens use depth-48 stacks on an 8 vCPU Timeweb VPS with
 
 Full tables and pins:
 
+- [72-hour RoadRunner + agent soak](https://github.com/tracewick/benchmarks/blob/main/reports/2026-11-22-soak-rr-agent-72h.md)
+  records agent `a15f0d3`; the [current-development campaign](https://github.com/tracewick/benchmarks/pull/11)
+  covers this candidate's runtime source `d464fac`, including recovery and real Symfony delivery.
+  The latter is a separate campaign, not another 72-hour run.
 - [soak FPM](https://github.com/tracewick/benchmarks/blob/main/reports/2026-11-07-soak-fpm-agent-depth48-cloud.md) ·
   [Swoole](https://github.com/tracewick/benchmarks/blob/main/reports/2026-11-07-soak-swoole-agent-depth48-cloud.md) ·
   [RoadRunner](https://github.com/tracewick/benchmarks/blob/main/reports/2026-11-08-soak-rr-agent-depth48-cloud.md)
@@ -112,22 +119,28 @@ Wire format and delivery decisions live in
 ## Install
 
 Pin a release tag (see [Releases](https://github.com/tracewick/agent/releases)).
-Artifacts are **unsigned** — verify `checksums.txt` (and prefer an image digest
+Existing 0.2.x artifacts are **unsigned** — verify `checksums.txt` (and prefer an image digest
 for containers).
+For this candidate, first [verify the signed checksums and matching archive/SBOM](deploy/verify-release.md).
+The commands below become usable after the candidate's release workflow publishes its assets.
 
 ### Binary (linux amd64 / arm64)
 
 Archives ship the binary as `tracewick-agent`:
 
 ```bash
-VER=0.2.0
+VER=1.0.0-rc.1
 ARCH=amd64   # or arm64
-curl -fsSL -o agent.tgz \
-  "https://github.com/tracewick/agent/releases/download/v${VER}/tracewick-agent_${VER}_linux_${ARCH}.tar.gz"
+ARCHIVE="tracewick-agent_${VER}_linux_${ARCH}.tar.gz"
+curl -fsSL -o "$ARCHIVE" \
+  "https://github.com/tracewick/agent/releases/download/v${VER}/${ARCHIVE}" || exit 1
 curl -fsSL -o checksums.txt \
-  "https://github.com/tracewick/agent/releases/download/v${VER}/checksums.txt"
-sha256sum -c --ignore-missing checksums.txt
-tar -xzf agent.tgz tracewick-agent
+  "https://github.com/tracewick/agent/releases/download/v${VER}/checksums.txt" || exit 1
+# Authenticate checksums.txt with Cosign as linked above before continuing.
+awk -v name="$ARCHIVE" '$2 == name {print; count++} END {if (count != 1) exit 1}' \
+  checksums.txt > selected-checksum.txt || exit 1
+sha256sum --check selected-checksum.txt || exit 1
+tar -xzf "$ARCHIVE" tracewick-agent
 sudo install -m 0755 tracewick-agent /usr/local/bin/tracewick-agent
 tracewick-agent version
 ```
@@ -135,12 +148,13 @@ tracewick-agent version
 ### Container (GHCR)
 
 ```bash
-docker pull ghcr.io/tracewick/agent:0.2.0
+docker pull ghcr.io/tracewick/agent:1.0.0-rc.1
 # pin by digest in production when possible:
 # docker pull ghcr.io/tracewick/agent@sha256:…
 ```
 
 Compose / Kubernetes examples (UID-compatible): [`deploy/`](deploy/).
+RC images have versioned tags (`1.0.0-rc.1` and `v1.0.0-rc.1`); they do not update `latest`.
 
 ## Configure and run
 
@@ -156,11 +170,33 @@ and a Pyroscope base URL.
 | Tenant (`X-Scope-OrgID`) | `--pyroscope-tenant` | `TRACEWICK_PYROSCOPE_TENANT` |
 | Prometheus `/metrics` | `--metrics-listen` | `TRACEWICK_METRICS_LISTEN` |
 | Extra TLS CA PEM | `--tls-ca` | `TRACEWICK_TLS_CA` |
+| Reader identity | `--reader-id` | `TRACEWICK_READER_ID` |
+| Merge window (integer seconds, 10–15) | `--aggregation-window` | `TRACEWICK_AGGREGATION_WINDOW` |
+| Idle delay (duration, e.g. `250ms`, `5s`) | `--sleep` | `TRACEWICK_SLEEP` |
+| Shutdown grace (duration, e.g. `30s`) | `--shutdown-grace` | `TRACEWICK_SHUTDOWN_GRACE` |
+| Rejected-file retention (count) | `--max-rejected-files` | `TRACEWICK_MAX_REJECTED_FILES` |
+| Stack cap (count) | `--max-stacks` | `TRACEWICK_MAX_STACKS` |
+| Frame cap (count) | `--max-frames` | `TRACEWICK_MAX_FRAMES` |
+| String cap (count) | `--max-strings` | `TRACEWICK_MAX_STRINGS` |
+| Held decoded budget (decimal bytes) | `--max-held-decoded-bytes` | `TRACEWICK_MAX_HELD_DECODED_BYTES` |
+| In-flight budget (decimal bytes) | `--max-in-flight-bytes` | `TRACEWICK_MAX_IN_FLIGHT_BYTES` |
 
-CLI flags override env when both are set. Password must never appear on argv or
-in `--pyroscope-url` userinfo. Other knobs (`--reader-id`, `--aggregation-window`,
-`--sleep`, decode/memory caps, `--once`, …) are flags today — see
-`tracewick-agent run --help`.
+An explicitly supplied CLI option wins over env **including an empty value**. Empty optional
+strings clear the setting (for example `--metrics-listen=` disables metrics); `--reader-id=`
+resets the automatic host/pid identifier. Empty required strings or numeric/duration options
+fail validation, without falling back to env. A valid CLI override ignores an invalid env value.
+Empty environment variables mean unset and use defaults. `--once` and `--help` remain CLI-only.
+
+Formats and bounds match CLI. Zero sleep/grace and rejected retention are valid; zero decode/memory
+caps keep existing defaults. Byte budgets use decimal byte counts, not `64M` suffixes. PHP drain
+uses integer seconds in `TRACEWICK_SLEEP_SECONDS`; this agent uses duration strings in
+`TRACEWICK_SLEEP`. Defaults are unchanged (see `tracewick-agent run --help`).
+
+The agent reads the process environment (`os.Getenv`); it does not load `.env` files. Docker
+Compose's `.env` is an interpolation source: pass values through `environment` or `env_file`
+to put them in the container environment. systemd can supply them with `EnvironmentFile`.
+Password remains environment-only and must not appear on argv or in URL userinfo; clearing an
+auth user while a password is present is an error.
 
 ### Long-running sidecar (recommended)
 
@@ -221,7 +257,7 @@ docker run --rm --user "$(id -u):$(id -g)" \
   -e TRACEWICK_SPOOL_DIR=/var/spool/tracewick \
   -e TRACEWICK_PYROSCOPE_URL=https://pyroscope.example \
   -e TRACEWICK_PYROSCOPE_PASSWORD \
-  ghcr.io/tracewick/agent:0.2.0 run --reader-id=sidecar-1
+  ghcr.io/tracewick/agent:1.0.0-rc.1 run --reader-id=sidecar-1
 ```
 
 For a one-shot pass, append `--once`. Compose and Kubernetes manifests:

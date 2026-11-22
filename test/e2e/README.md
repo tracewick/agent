@@ -18,10 +18,12 @@ still runs (httptest). CI `e2e.yml` starts the stand and exports the env.
 
 ## Release posture
 
-README marks **beta (`0.2.x`)**, not production readiness. Keep release cuts
+README marks **release candidate (`1.0.0-rc.1`)**, not production readiness. Keep release cuts
 (GoReleaser), honest unsigned notes until cosign, and soak via
 [`tracewick/benchmarks`](https://github.com/tracewick/benchmarks). E2E here
 covers stand, Toxiproxy chaos, Querier live, and Go + PHP-drain coexistence.
+`make php-drain` installs the published core `1.0.0-rc.1` for this candidate's
+coexistence check; version numbers do not replace the spool v2 contract.
 
 ## Canon (parity with `tracewick/tracewick`)
 
@@ -46,7 +48,8 @@ covers stand, Toxiproxy chaos, Querier live, and Go + PHP-drain coexistence.
   `make e2e` uses `-v` so lines prefixed `e2e:` show progress in CI.
 - Done: UID-mismatch (Docker volume, wrong UID vs matching `33`) —
   `TestUIDMismatchCannotClaimMatchingCan` (skips without docker).
-- Next: benchmarks soak. Mutation MSI gate is `make mutation` (Checks step, not
+- Load/soak evidence lives in benchmarks with its own source pins; it is not
+  produced by this E2E suite. Mutation MSI gate is `make mutation` (Checks step, not
   e2e). FakeHttp-class faults live under `internal/testhttp` +
   `internal/pyroscope` (unit).
 

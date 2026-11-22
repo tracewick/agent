@@ -35,7 +35,10 @@ writes `/var/spool/tracewick`.
 | Source | Image |
 | --- | --- |
 | Local | `make docker-build` → `tracewick-agent:local` |
-| Release | `ghcr.io/tracewick/agent:<version>` (multi-arch amd64/arm64; e.g. `0.2.0`) |
+| Release | `ghcr.io/tracewick/agent:<version>` (multi-arch amd64/arm64; candidate `1.0.0-rc.1`) |
+
+Candidate images become available after publication. Prereleases do not move the
+stable `latest` tag; pin the candidate version or its verified image digest.
 
 ```bash
 make docker-build
@@ -46,4 +49,6 @@ docker run --rm --user "$(id -u):$(id -g)" \
   tracewick-agent:local run --once
 ```
 
-Published tags are **unsigned** until cosign lands; pin by digest when possible.
+Existing 0.2.x releases are **unsigned**. For releases made by the signed-release
+workflow, verify the checksum bundle or GHCR index signature before use, then pin
+the image digest. See [SBOM/signature verification](verify-release.md).

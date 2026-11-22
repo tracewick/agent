@@ -80,6 +80,11 @@ make stand-down
 - English only. Conventional Commits. Do not hand-edit `CHANGELOG.md`.
 - Do not invent agent-local ADR numbers that shadow main-repo ADRs; link them.
 - Git flow: branch `feature/*` from `develop`, open PRs into `develop`.
+  Promote to `main` **only** via `release/<version>` or `hotfix/<version>` —
+  never a direct feature/fix/chore PR into `main`. Agents may merge into
+  `develop` after Checks green; **never** merge anything whose base is `main`
+  (release PR, release-please, back-merge — maintainer only). «Делай» does not
+  override this.
 - After opening or pushing a PR, babysit checks (`gh pr checks`, Codecov) until
   green; fix failures yourself. Report only when review-ready or blocked on a
   secret/decision.
@@ -88,3 +93,4 @@ make stand-down
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) § Releasing. Do not invent tags outside
 release-please. Do not push or merge to `main` unless the maintainer asks.
+Path: `develop` → `release/<ver>` → `main` (merge commit) → release-please tag.
